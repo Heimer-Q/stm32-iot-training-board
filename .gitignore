@@ -20,7 +20,6 @@ JLinkLog.txt
 
 # CubeMX 临时/备份
 *.mxbackup
-.mxproject
 
 # 系统
 Thumbs.db
