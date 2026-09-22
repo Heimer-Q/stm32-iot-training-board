@@ -2,6 +2,13 @@
 Objects/
 Listings/
 DebugConfig/
+MDK-ARM/Training/
+*.htm
+*.lnp
+*.sct
+*.map
+*.dep
+build_log*.txt
 *.o
 *.d
 *.crf
