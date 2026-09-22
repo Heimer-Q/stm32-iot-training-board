@@ -1,0 +1,28 @@
+# Keil MDK 编译产物与中间文件
+Objects/
+Listings/
+DebugConfig/
+*.o
+*.d
+*.crf
+*.lst
+*.map
+*.axf
+*.hex
+*.bin
+*.build_log.htm
+*.htm
+*.dep
+*.iex
+*.sct.bak
+*.uvguix.*
+JLinkLog.txt
+
+# CubeMX 临时/备份
+*.mxbackup
+.mxproject
+
+# 系统
+Thumbs.db
+Desktop.ini
+.DS_Store
