@@ -561,6 +561,16 @@
               <FileType>1</FileType>
               <FilePath>..\Hardware\Src\bsp_key.c</FilePath>
             </File>
+            <File>
+              <FileName>bsp_oled.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Hardware\Src\bsp_oled.c</FilePath>
+            </File>
+            <File>
+              <FileName>oled.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Hardware\Src\oled.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -570,6 +580,16 @@
               <FileName>app_light.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\App\Src\app_light.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_main.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\Src\app_main.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_selftest.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\Src\app_selftest.c</FilePath>
             </File>
           </Files>
         </Group>

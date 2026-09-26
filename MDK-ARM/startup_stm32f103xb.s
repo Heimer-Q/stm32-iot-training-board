@@ -40,7 +40,9 @@ __initial_sp
 ;   <o>  Heap Size (in Bytes) <0x0-0xFFFFFFFF:8>
 ; </h>
 
-Heap_Size      EQU     0x200
+; 铁头山羊 oled.c 用 malloc 分配 1025 字节显存，堆必须够大（>=0x800）；
+; 注意：CubeMX 重新生成代码会把这个值改回 0x200，生成后要检查这一行。
+Heap_Size      EQU     0x800
 
                 AREA    HEAP, NOINIT, READWRITE, ALIGN=3
 __heap_base
