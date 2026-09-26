@@ -127,21 +127,23 @@ static uint32_t temp_percent(void)
    —— 和光控同一套逻辑，越热/越暗，亮的颗数越多 */
 static uint8_t temp_band_count(void)
 {
-    uint32_t pct  = temp_percent();
-    uint32_t hi   = temp_mid;                       /* 起点（按键可调） */
-    uint32_t lo   = temp_high;                      /* 终点（按键可调） */
+    /* 注意：这里必须统一用"原始码"比较。
+       之前拿百分比(47) 去比原始码(1924)，条件永远不成立，导致任何温度都返回 3 颗。 */
+    uint32_t raw  = BSP_ADC_GetRaw(BSP_ADC_CH_TEMP);
+    uint32_t hi   = temp_mid;                       /* 起点（原始码，按键可调） */
+    uint32_t lo   = temp_high;                      /* 终点（原始码，按键可调） */
     uint32_t span = (hi > lo) ? (hi - lo) : 1U;
 
 #if CFG_TEMP_INVERT
-    if (pct >= hi) return 0U;                       /* 室温：不亮 */
-    if (pct >= lo + span * 2U / 3U) return 1U;      /* 有点热：1 颗闪 */
-    if (pct >= lo + span / 3U)      return 2U;      /* 比较热：2 颗闪 */
+    if (raw >= hi) return 0U;                       /* 室温：读数大 → 不亮 */
+    if (raw >= lo + span * 2U / 3U) return 1U;      /* 有点热：1 颗闪 */
+    if (raw >= lo + span / 3U)      return 2U;      /* 比较热：2 颗闪 */
     return 3U;                                      /* 很热：3 颗一起闪 */
 #else
-    if (pct <= lo) return 3U;
-    if (pct >= hi) return 0U;
-    if (pct >= hi - span / 3U)      return 1U;
-    if (pct >= hi - span * 2U / 3U) return 2U;
+    if (raw <= lo) return 3U;
+    if (raw >= hi) return 0U;
+    if (raw >= hi - span / 3U)      return 1U;
+    if (raw >= hi - span * 2U / 3U) return 2U;
     return 3U;
 #endif
 }
@@ -625,9 +627,10 @@ void APP_Demo_Process(void)
     if (now - t_beat >= 2000U)
     {
         t_beat += 2000U;
-        BSP_UART_Printf("[tick] scr=%d mode=%s lock=%d lgt=%d%% rawT=%d lamp=%d/%d/%d/%d ev=%d/%d/%d\r\n",
+        /* TN = 热控现在该亮几颗（0—3），RemoteT = 原始码；调阈值时看这两个数最直观 */
+        BSP_UART_Printf("[tick] scr=%d mode=%s lock=%d lgt=%d%% rawT=%d TN%d lamp=%d/%d/%d/%d ev=%d/%d/%d\r\n",
                         (int)screen, mode_name(), locked,
-                        BSP_ADC_LightPercent(), BSP_ADC_GetRaw(BSP_ADC_CH_TEMP),
+                        BSP_ADC_LightPercent(), BSP_ADC_GetRaw(BSP_ADC_CH_TEMP), temp_band_count(),
                         lamp_on, lamp_all, lamp_breath, lamp_flow,
                         ev_click, ev_long, ev_dbl);
     }
