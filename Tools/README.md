@@ -112,3 +112,25 @@ python Tools/make_preview_sheet.py 赵权泽 黎叶 陈玉燊    # 指定名字
 - 光标 Y 是**基线**，格子底边贴在基线上（`BByoff0y = 0`）；
 - 行高 = `FontSize` = `FBBy` = 格子高度，用于换行与 `OLED_GetFontHeight()`；
 - 基线位置：英文第 13 行（下面留 3 行给 g/p/y），中文第 14 行（汉字不下伸，字身撑满 16 像素）。
+
+## 8. 动图（GIF）转换 —— `make_gif.py`
+
+从一张 GIF 到屏幕上能播的动图，一共五步（详细版见《功能手册》第八章）：
+
+1. **抽帧**：<https://ezgif.com/split/> 上传 GIF → `Split!` → 下载抽帧 zip → 解压
+2. **二值化**：<https://jlamch.net/MXChipWelcome/> 选 128×64 或 64×64 → 导入图片 → 生成数组
+3. 把生成的数组存成 txt（同一张动图的多帧放在一份 txt 里），丢进 `Tools/gif_src/`
+4. 在 `Tools/gifs.json` 里加一条：`name` / `source` / `size` / `step` / `delay`
+5. 跑工具并重新编译：
+
+```powershell
+python Tools/make_gif.py --config Tools/gifs.json
+```
+
+工具会自动**分帧 → 判断播放顺序**（导出帧号常常乱序，按错顺序播会一跳一跳）→ 抽帧 → 缩放裁剪 → 打包成驱动格式，写进 `Hardware/Inc/oled_gif.h`。
+
+小技巧：
+
+- `--peek 3` 把第 3 帧打成字符画，用来核对"取模有没有解析反"；
+- `size` 越小、`step` 越大越省 Flash（64×64 一帧 512 字节，128×64 一帧 1024 字节）；
+- 宽度不是 8 的整数倍（如 498）不用管，工具按 `ceil(宽/8)` 算行跨距。
