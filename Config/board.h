@@ -19,13 +19,13 @@
 #define LED_NUM          3U
 #define LED_PWM_PERIOD   1000U   /* 对应 .ioc 的 Period = 1000-1 */
 
-/* 按键：PB12 / PB13 / PB14，内部上拉，按下为低 */
+/* 按键：PB12 / PB8 / PB9，内部上拉，按下为低（PB13/PB14/PB15 留给 SPI2） */
 #define KEY1_PORT   GPIOB
 #define KEY1_PIN    GPIO_PIN_12
 #define KEY2_PORT   GPIOB
-#define KEY2_PIN    GPIO_PIN_13
+#define KEY2_PIN    GPIO_PIN_8
 #define KEY3_PORT   GPIOB
-#define KEY3_PIN    GPIO_PIN_14
+#define KEY3_PIN    GPIO_PIN_9
 
 /* 传感器：光敏 PA0 = ADC1_IN0，热敏 PA1 = ADC1_IN1 */
 #define LIGHT_ADC_CHANNEL   ADC_CHANNEL_0
