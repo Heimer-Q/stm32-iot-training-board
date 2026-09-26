@@ -141,15 +141,23 @@ static void lamp_update(void)
 
     if (mode == MODE_LIGHT)
     {
-        /* 越暗，依次点亮更多颗，并且都是呼吸状态 */
-        uint32_t p   = BSP_ADC_LightPercent();
-        uint32_t thr = light_thr;
-        uint8_t  n   = 0U;
-        uint8_t  b   = breath_level(now);
+        /* 越暗，依次点亮更多颗，并且都是呼吸状态。
+           上限 = light_thr（按键可调，默认 77% 实测室内值）
+           下限 = CFG_LIGHT_ON_PCT（12% 实测遮住值）
+           中间均分三档 */
+        uint32_t p    = BSP_ADC_LightPercent();
+        uint32_t off  = light_thr;
+        uint32_t on   = CFG_LIGHT_ON_PCT;
+        uint32_t span = (off > on) ? (off - on) : 1U;
+        uint8_t  n    = 0U;
+        uint8_t  b    = breath_level(now);
 
-        if (p < thr)                            n = 1U;
-        if (p + CFG_LIGHT_THR_STEP < thr)       n = 2U;
-        if (p + CFG_LIGHT_THR_STEP * 2U < thr)  n = 3U;
+        if (p < off)
+        {
+            if      (p >= on + span * 2U / 3U) n = 1U;
+            else if (p >= on + span / 3U)      n = 2U;
+            else                               n = 3U;
+        }
         for (i = 0U; i < n; i++)
         {
             duty[i] = b;
