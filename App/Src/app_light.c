@@ -40,24 +40,24 @@ void APP_Light_Init(void)
 
 void APP_Light_Process(void)
 {
-    /* 按键扫描：每 10ms 一次 */
-    if (HAL_GetTick() - last_tick >= BSP_KEY_SCAN_MS)
+    /* 灯效相位：每 10ms 推进一步（按键由中断里的状态机负责，这里不再扫描） */
+    if (HAL_GetTick() - last_tick >= BSP_KEY_TICK_MS)
     {
-        last_tick += BSP_KEY_SCAN_MS;
-        BSP_KEY_Scan();
+        last_tick += BSP_KEY_TICK_MS;
         phase++;
+    }
 
-        if (BSP_KEY_WasClicked(BSP_KEY_1))
-        {
-            mode = (LightMode)((mode + 1U) % LIGHT_MODE_NUM);
-            BSP_LED_AllOff();
-            phase = 0U;
-        }
-        if (BSP_KEY_WasClicked(BSP_KEY_3))
-        {
-            mode = (mode == LIGHT_MODE_OFF) ? LIGHT_MODE_BREATH : LIGHT_MODE_OFF;
-            BSP_LED_AllOff();
-        }
+    /* K1 短按：换灯效；K3 短按：开/关 */
+    if (BSP_KEY_GetEvent(BSP_KEY_1) == BSP_KEY_EVENT_CLICK)
+    {
+        mode = (LightMode)((mode + 1U) % LIGHT_MODE_NUM);
+        BSP_LED_AllOff();
+        phase = 0U;
+    }
+    if (BSP_KEY_GetEvent(BSP_KEY_3) == BSP_KEY_EVENT_CLICK)
+    {
+        mode = (mode == LIGHT_MODE_OFF) ? LIGHT_MODE_BREATH : LIGHT_MODE_OFF;
+        BSP_LED_AllOff();
     }
 
     switch (mode)

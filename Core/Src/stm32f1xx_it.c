@@ -22,6 +22,7 @@
 #include "stm32f1xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "bsp_key.h"     /* 按键状态机节拍（BSP_KEY_TickIsr） */
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -187,7 +188,7 @@ void SysTick_Handler(void)
   /* USER CODE END SysTick_IRQn 0 */
   HAL_IncTick();
   /* USER CODE BEGIN SysTick_IRQn 1 */
-
+  BSP_KEY_TickIsr();   /* 三个按键的状态机：1ms 进来，内部 10 分频 = 10ms 一拍 */
   /* USER CODE END SysTick_IRQn 1 */
 }
 

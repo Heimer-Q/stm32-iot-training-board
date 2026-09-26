@@ -45,7 +45,6 @@ static uint8_t lamp_sel;        /* 单灯模式下选中的是第几颗（0..2�
 static uint8_t lamp_breath;     /* 1 = 呼吸 */
 static uint8_t lamp_adc;        /* 1 = 光控（光照越暗越亮） */
 
-static uint32_t last_scan_tick;
 static uint32_t last_adc_tick;
 static uint32_t last_draw_tick;
 static uint32_t last_beat_tick;
@@ -217,7 +216,8 @@ void APP_SelfTest_Init(void)
     BSP_LED_AllOff();
 
     BSP_UART_Printf("[led ] 3 LEDs OK (PA6/PA7/PB0)\r\n");
-    BSP_UART_Printf("[key ] 3 keys OK (PB12/PB8/PB9), long press = %u ms\r\n", (unsigned)BSP_KEY_LONG_MS);
+    BSP_UART_Printf("[key ] 3 keys OK (PB12/PB8/PB9), long press = %u ms\r\n",
+                    (unsigned)(BSP_KEY_LONG_TICKS * BSP_KEY_TICK_MS));
     BSP_UART_Printf("[rtc ] %s\r\n", BSP_RTC_Valid() ? "valid (LSE 32768Hz)" : "NOT valid - LSE fail");
 
     ret = BSP_OLED_Init();
@@ -241,10 +241,9 @@ void APP_SelfTest_Init(void)
 
     BSP_UART_Printf("[tips] K1=screen/adc-mode  K2=next lamp/all  K3=breath/off\r\n");
 
-    last_scan_tick = HAL_GetTick();
-    last_adc_tick  = last_scan_tick;
-    last_draw_tick = last_scan_tick;
-    last_beat_tick = last_scan_tick;
+    last_adc_tick  = HAL_GetTick();
+    last_draw_tick = last_adc_tick;
+    last_beat_tick = last_adc_tick;
     last_keys      = 0U;
 }
 
@@ -252,13 +251,7 @@ void APP_SelfTest_Process(void)
 {
     uint32_t now = HAL_GetTick();
     uint8_t  keys;
-
-    /* ---- 10ms：按键扫描 ---- */
-    if (now - last_scan_tick >= CFG_KEY_SCAN_MS)
-    {
-        last_scan_tick += CFG_KEY_SCAN_MS;
-        BSP_KEY_Scan();
-    }
+    BSP_KEY_Event ev;
 
     /* ---- 按键状态变化（给调试看） ---- */
     keys = read_keys();
@@ -271,30 +264,51 @@ void APP_SelfTest_Process(void)
         last_keys = keys;
     }
 
-    /* ---- K1：短按切画面 / 长按光控模式 ---- */
-    if (BSP_KEY_WasClicked(BSP_KEY_1))
+    /* ---- 按键事件（状态机在 SysTick 中断里跑，这里只取事件；取走即清） ---- */
+    ev = BSP_KEY_GetEvent(BSP_KEY_1);
+    if (ev == BSP_KEY_EVENT_LONG_REPEAT)      /* 长按持续：以后调时间会用 */
     {
+        BSP_UART_Printf("[key ] K1 long-repeat\r\n");
+    }
+    switch (ev)
+    {
+    case BSP_KEY_EVENT_CLICK:                 /* 短按：切换画面 */
         screen = (ScreenId)((screen + 1U) % (uint8_t)SCR_NUM);
         if (oled_ok)
         {
-            OLED_Clear(&g_oled);      /* 换画面先清屏，避免残留 */
+            OLED_Clear(&g_oled);              /* 换画面先清屏，避免残留 */
         }
         BSP_UART_Printf("[ui  ] screen -> %d\r\n", (int)screen);
-    }
-    if (BSP_KEY_WasLongPressed(BSP_KEY_1))
-    {
+        break;
+    case BSP_KEY_EVENT_DOUBLE:                /* 双击：直接回画面 1 */
+        screen = SCR_STATUS;
+        if (oled_ok)
+        {
+            OLED_Clear(&g_oled);
+        }
+        BSP_UART_Printf("[ui  ] double -> screen 0\r\n");
+        break;
+    case BSP_KEY_EVENT_LONG:                  /* 长按：光控模式开关 */
         lamp_adc = (uint8_t)(!lamp_adc);
         if (lamp_adc && !lamp_all && !lamp_on)
         {
-            lamp_on  = 1U;            /* 光控模式下总得有一盏灯给你控 */
+            lamp_on  = 1U;                    /* 光控模式下总得有一盏灯给你控 */
             lamp_sel = 0U;
         }
         BSP_UART_Printf("[lamp] ADC mode %s\r\n", lamp_adc ? "ON" : "OFF");
+        break;
+    default:
+        break;
     }
 
-    /* ---- K2：短按选下一颗灯 / 长按全亮 ---- */
-    if (BSP_KEY_WasClicked(BSP_KEY_2))
+    ev = BSP_KEY_GetEvent(BSP_KEY_2);
+    if (ev == BSP_KEY_EVENT_LONG_REPEAT)
     {
+        BSP_UART_Printf("[key ] K2 long-repeat\r\n");
+    }
+    switch (ev)
+    {
+    case BSP_KEY_EVENT_CLICK:                 /* 短按：选下一颗灯亮 */
         lamp_all = 0U;
         lamp_adc = 0U;
         if (lamp_on)
@@ -307,29 +321,38 @@ void APP_SelfTest_Process(void)
             lamp_on  = 1U;
         }
         BSP_UART_Printf("[lamp] next -> LED%d\r\n", lamp_sel + 1);
-    }
-    if (BSP_KEY_WasLongPressed(BSP_KEY_2))
-    {
+        break;
+    case BSP_KEY_EVENT_LONG:                  /* 长按：三灯全亮 */
         lamp_all    = 1U;
         lamp_on     = 0U;
         lamp_breath = 0U;
         lamp_adc    = 0U;
         BSP_UART_Printf("[lamp] ALL ON\r\n");
+        break;
+    default:
+        break;
     }
 
-    /* ---- K3：短按呼吸/常亮切换 / 长按全灭 ---- */
-    if (BSP_KEY_WasClicked(BSP_KEY_3))
+    ev = BSP_KEY_GetEvent(BSP_KEY_3);
+    if (ev == BSP_KEY_EVENT_LONG_REPEAT)
     {
+        BSP_UART_Printf("[key ] K3 long-repeat\r\n");
+    }
+    switch (ev)
+    {
+    case BSP_KEY_EVENT_CLICK:                 /* 短按：呼吸 ⇄ 常亮 */
         lamp_breath = (uint8_t)(!lamp_breath);
         BSP_UART_Printf("[lamp] breath %s\r\n", lamp_breath ? "ON" : "OFF");
-    }
-    if (BSP_KEY_WasLongPressed(BSP_KEY_3))
-    {
+        break;
+    case BSP_KEY_EVENT_LONG:                  /* 长按：关闭所有灯 */
         lamp_all    = 0U;
         lamp_on     = 0U;
         lamp_breath = 0U;
         lamp_adc    = 0U;
         BSP_UART_Printf("[lamp] ALL OFF\r\n");
+        break;
+    default:
+        break;
     }
 
     /* ---- 灯：每 10ms 重算一次（呼吸要平滑） ---- */

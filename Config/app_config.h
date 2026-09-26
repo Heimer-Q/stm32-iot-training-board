@@ -20,8 +20,8 @@
 
 /* ============================== 可调参数 ============================== */
 
-/* 按键扫描周期（ms），不要小于 5，太密会重复触发 */
-#define CFG_KEY_SCAN_MS        10U
+/* 按键的采样节拍与长按/双击阈值都在 Hardware/Inc/bsp_key.h 里
+   （状态机跑在 SysTick 中断里，每 BSP_KEY_TICK_MS = 10ms 一拍） */
 
 /* OLED 刷新周期（ms）：只在数据变化时重画，避免闪烁 */
 #define CFG_OLED_REFRESH_MS    100U
