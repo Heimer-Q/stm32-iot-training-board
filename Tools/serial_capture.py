@@ -45,6 +45,7 @@ def main():
     ap.add_argument("--seconds", type=float, default=8.0)
     ap.add_argument("--reset", action="store_true", help="先复位目标再抓（抓完整启动日志）")
     ap.add_argument("--send", help="抓到 1 秒时发一串文本过去")
+    ap.add_argument("--timestamp", action="store_true", help="每行前面加相对时间（秒）")
     ap.add_argument("-o", "--output", help="同时写入这个文件")
     args = ap.parse_args()
 
@@ -65,15 +66,30 @@ def main():
     start = time.time()
     send_at = start + 1.0
     sent = False
+    pending = ""
+
+    def emit(text):
+        """写屏幕 + 写文件（--timestamp 时逐行加相对时间）"""
+        nonlocal pending
+        if args.timestamp:
+            pending += text
+            while "\n" in pending:
+                line, pending = pending.split("\n", 1)
+                stamped = f"[{time.time() - start:6.2f}] {line.rstrip()}\n"
+                sys.stdout.write(stamped)
+                if out_file:
+                    out_file.write(stamped)
+        else:
+            sys.stdout.write(text)
+            if out_file:
+                out_file.write(text)
+        sys.stdout.flush()
+
     while time.time() - start < args.seconds:
         chunk = port.read(512)
         if chunk:
             buf += chunk
-            text = chunk.decode("utf-8", "replace")
-            sys.stdout.write(text)
-            sys.stdout.flush()
-            if out_file:
-                out_file.write(text)
+            emit(chunk.decode("utf-8", "replace"))
         if args.send and not sent and time.time() >= send_at:
             port.write(args.send.encode("utf-8"))
             port.flush()
