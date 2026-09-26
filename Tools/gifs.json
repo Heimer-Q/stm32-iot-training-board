@@ -12,9 +12,9 @@
       "name": "anim1",
       "source": "Tools/gif_src/anim1.txt",
       "size": [64, 64],
-      "step": 3,
+      "step": 1,
       "delay": 70,
-      "comment": "蜡笔小新动图：原 59 帧 121x121，抽帧到 20 帧，64x64 居中"
+      "comment": "猫动图：原 14 帧 180x180，全部保留，64x64 居中"
     }
   ]
 }
