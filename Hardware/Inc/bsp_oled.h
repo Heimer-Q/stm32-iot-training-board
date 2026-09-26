@@ -30,4 +30,8 @@ void BSP_OLED_Refresh(void);
    @参数：x - 起始列；baseline_y - 这一行的基线 Y（16 像素一行时，第 n 行填 n*16+16） */
 void BSP_OLED_ShowUserText(int16_t x, int16_t baseline_y);
 
+/* 显示学生字库里的第 idx 行（0=USER_TEXT_1, 1=USER_TEXT_2, 2=USER_TEXT_3）
+   字库生成时用 | 分隔多行，例如：python Tools/make_font.py "哲学本263|陈桂林" */
+void BSP_OLED_ShowUserLine(uint8_t idx, int16_t x, int16_t baseline_y);
+
 #endif /* __BSP_OLED_H */

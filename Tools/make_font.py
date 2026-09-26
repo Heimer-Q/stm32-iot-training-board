@@ -151,7 +151,9 @@ def build_header(symbol, font_name, font_path, size, chars, cell_w, cell_h, base
     if texts:
         L.append("/* 直接给 OLED_DrawString / OLED_Printf 用的文本（UTF-8 八进制转义，不受源码编码影响）")
         L.append("   注意：屏幕上要显示的字，必须出现在生成字库时写的那几句话里 */")
-        for i, t in enumerate(texts, 1):
+        # 固定给出 3 行（不足补空串），这样应用代码里引用 USER_TEXT_1/2/3 永远能编译
+        shown = list(texts) + [""] * max(0, 3 - len(texts))
+        for i, t in enumerate(shown, 1):
             L.append(f'#define USER_TEXT_{i} "{c_escape(t)}"   /* {t} */')
         L.append("")
         L.append("#define USER_FONT_TEXT USER_TEXT_1   /* 兼容旧写法：默认显示第一句 */")

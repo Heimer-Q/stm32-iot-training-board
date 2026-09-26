@@ -38,7 +38,7 @@
 #include <stdio.h>
 
 /* ------------------------------- 状态 ------------------------------- */
-typedef enum { SCR_CLOCK = 0, SCR_IMAGE, SCR_STATUS, SCR_NUM } ScreenId;
+typedef enum { SCR_CLOCK = 0, SCR_IMAGE, SCR_STATUS, SCR_INFO, SCR_NUM } ScreenId;
 typedef enum { MODE_NORMAL = 0, MODE_LIGHT, MODE_THERMAL, MODE_NUM } WorkMode;
 enum { TU_YEAR = 0, TU_MONTH, TU_DAY, TU_HOUR, TU_MIN, TU_SEC, TU_NUM };
 
@@ -112,6 +112,21 @@ static const char *mode_name(void)
         case MODE_THERMAL: return "THERMAL";
         default:           return "NORMAL";
     }
+}
+
+/* 从 __DATE__（形如 "Sep 26 2026"）里取出月份数字 */
+static uint8_t month_num(const char *m)
+{
+    static const char names[12][4] = {"Jan","Feb","Mar","Apr","May","Jun",
+                                      "Jul","Aug","Sep","Oct","Nov","Dec"};
+    for (uint8_t i = 0U; i < 12U; i++)
+    {
+        if ((m[0] == names[i][0]) && (m[1] == names[i][1]) && (m[2] == names[i][2]))
+        {
+            return (uint8_t)(i + 1U);
+        }
+    }
+    return 1U;
 }
 
 static const char *unit_name(void)
@@ -381,6 +396,27 @@ static void draw_status(void)
                 (unsigned)temp_percent(), (unsigned)raw_to_pct(temp_mid), temp_band_count());
 }
 
+/* 信息页：前两行是学生字库里的中文（生成时用 | 分隔），下面两行放协会/固件信息 */
+static void draw_info(void)
+{
+    uint8_t day = (uint8_t)(((( __DATE__[4] == ' ') ? 0 : (__DATE__[4] - '0')) * 10)
+                            + (__DATE__[5] - '0'));
+
+    BSP_OLED_ShowUserLine(0U, 0, (int16_t)(1U * line_h));   /* 例如 哲学本263 */
+    BSP_OLED_ShowUserLine(1U, 0, (int16_t)(2U * line_h));   /* 例如 陈桂林     */
+
+    if (locked)
+    {
+        show_line(3U, "** LOCKED **");
+    }
+    else
+    {
+        show_line(2U, "WULIAN IOT ASSOC");
+        line_printf(3U, "FW 20%c%c-%02d-%02d",
+                    __DATE__[9], __DATE__[10], month_num(__DATE__), day);
+    }
+}
+
 static void screen_draw(void)
 {
     if (!oled_ok)
@@ -399,6 +435,7 @@ static void screen_draw(void)
         {
             case SCR_CLOCK:  draw_clock();  break;
             case SCR_STATUS: draw_status(); break;
+            case SCR_INFO:   draw_info();   break;
             default: break;
         }
     }

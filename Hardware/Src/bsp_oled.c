@@ -86,3 +86,21 @@ void BSP_OLED_ShowUserText(int16_t x, int16_t baseline_y)
     OLED_DrawString(&g_oled, USER_FONT_TEXT);
     OLED_SetFont(&g_oled, keep);
 }
+
+void BSP_OLED_ShowUserLine(uint8_t idx, int16_t x, int16_t baseline_y)
+{
+    const Font_TypeDef *keep = g_oled.Font;
+    const char *text;
+
+    switch (idx)
+    {
+        case 1U:  text = USER_TEXT_2; break;
+        case 2U:  text = USER_TEXT_3; break;
+        default:  text = USER_TEXT_1; break;
+    }
+
+    OLED_SetFont(&g_oled, &font_user);
+    OLED_SetCursor(&g_oled, x, baseline_y);
+    OLED_DrawString(&g_oled, text);
+    OLED_SetFont(&g_oled, keep);
+}
