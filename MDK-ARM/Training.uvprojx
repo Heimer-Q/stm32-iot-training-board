@@ -567,6 +567,11 @@
               <FilePath>..\Hardware\Src\bsp_oled.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_uart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Hardware\Src\bsp_uart.c</FilePath>
+            </File>
+            <File>
               <FileName>oled.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Hardware\Src\oled.c</FilePath>
