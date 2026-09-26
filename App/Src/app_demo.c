@@ -120,7 +120,13 @@ static const char *unit_name(void)
 /* 温度占满量程的百分比（0—100） */
 static uint32_t temp_percent(void)
 {
-    return (uint32_t)BSP_ADC_GetRaw(BSP_ADC_CH_TEMP) * 100U / 4095U;
+    return ((uint32_t)BSP_ADC_GetRaw(BSP_ADC_CH_TEMP) * 100U + 2047U) / 4095U;   /* 四舍五入 */
+}
+
+/* 原始码 → 百分比（四舍五入）。直接截断会出现"阈值 42% 显示成 41%"的假象 */
+static uint32_t raw_to_pct(uint16_t raw)
+{
+    return ((uint32_t)raw * 100U + 2047U) / 4095U;
 }
 
 /* 光控档位：把 [遮住下限 … 阈值上限] 均分三份，返回该亮几颗（0—3） */
@@ -320,7 +326,7 @@ static void draw_clock(void)
             /* 温度：当前百分比 + 起点阈值 + 该亮几颗（0—3） */
             line_printf(3, "TMP %3d%% M%2d N%d",
                         (unsigned)temp_percent(),
-                        (unsigned)(temp_mid * 100U / 4095U),
+                        (unsigned)raw_to_pct(temp_mid),
                         temp_band_count());
         }
     }
@@ -340,7 +346,15 @@ static void draw_status(void)
 {
     uint32_t up = (HAL_GetTick() - boot_ms) / 1000U;
 
-    line_printf(0, "MODE %s", mode_name());
+    /* 热控模式下顺便把高温阈值显示在标题行（调 K3 时能看见） */
+    if (mode == MODE_THERMAL)
+    {
+        line_printf(0, "MODE %s H%d", mode_name(), (unsigned)raw_to_pct(temp_high));
+    }
+    else
+    {
+        line_printf(0, "MODE %s", mode_name());
+    }
     if (locked)
     {
         show_line(1, "** LOCKED **");
@@ -352,12 +366,11 @@ static void draw_status(void)
                     (unsigned long)((up / 60U) % 60U),
                     (unsigned long)(up % 60U));
     }
-    line_printf(2, "LGT %3d%% T%2d",
-                BSP_ADC_LightPercent(), light_thr);
-    line_printf(3, "TMP %3d%% M%2dH%2d",
-                (unsigned)((uint32_t)BSP_ADC_GetRaw(BSP_ADC_CH_TEMP) * 100U / 4095U),
-                (unsigned)(temp_mid * 100U / 4095U),
-                (unsigned)(temp_high * 100U / 4095U));
+    /* 和时钟页同一套格式：值% 阈值 该亮几颗 */
+    line_printf(2, "LGT %3d%% T%2d N%d",
+                BSP_ADC_LightPercent(), (unsigned)light_thr, light_band_count());
+    line_printf(3, "TMP %3d%% M%2d N%d",
+                (unsigned)temp_percent(), (unsigned)raw_to_pct(temp_mid), temp_band_count());
 }
 
 static void screen_draw(void)
