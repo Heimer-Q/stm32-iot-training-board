@@ -8,7 +8,7 @@
 | 功能 | MCU 引脚 | 外设 |
 |---|---|---|
 | LED1 / LED2 / LED3 | PA6 / PA7 / PB0 | TIM3_CH1 / CH2 / CH3（PWM） |
-| 按键 KEY1 / KEY2 / KEY3 | PB12 / PB13 / PB14 | GPIO 输入，内部上拉 |
+| 按键 KEY1 / KEY2 / KEY3 | PB12 / PB8 / PB9 | GPIO 输入，内部上拉（PB13/14/15 留给 SPI2 拓展排针） |
 | 光敏 AO / 热敏 AO | PA0 / PA1 | ADC1_IN0 / ADC1_IN1 |
 | OLED SCL / SDA | PB6 / PB7 | I2C1（从地址 0x3C） |
 | ESP8266 TXD / RXD | PA3 / PA2 | USART2（115200） |
