@@ -123,6 +123,20 @@ static uint32_t temp_percent(void)
     return (uint32_t)BSP_ADC_GetRaw(BSP_ADC_CH_TEMP) * 100U / 4095U;
 }
 
+/* 光控档位：把 [遮住下限 … 阈值上限] 均分三份，返回该亮几颗（0—3） */
+static uint8_t light_band_count(void)
+{
+    uint32_t p    = BSP_ADC_LightPercent();
+    uint32_t off  = light_thr;              /* 上限（按键可调，默认 77%） */
+    uint32_t on   = CFG_LIGHT_ON_PCT;       /* 下限（实测遮住值 12%） */
+    uint32_t span = (off > on) ? (off - on) : 1U;
+
+    if (p >= off) return 0U;                /* 够亮：不亮灯 */
+    if (p >= on + span * 2U / 3U) return 1U;
+    if (p >= on + span / 3U)      return 2U;
+    return 3U;
+}
+
 /* 热控档位：把 [高温端 … 中温端] 均分三份，返回该亮几颗（0—3）
    —— 和光控同一套逻辑，越热/越暗，亮的颗数越多 */
 static uint8_t temp_band_count(void)
@@ -162,23 +176,10 @@ static void lamp_update(void)
 
     if (mode == MODE_LIGHT)
     {
-        /* 越暗，依次点亮更多颗，并且都是呼吸状态。
-           上限 = light_thr（按键可调，默认 77% 实测室内值）
-           下限 = CFG_LIGHT_ON_PCT（12% 实测遮住值）
-           中间均分三档 */
-        uint32_t p    = BSP_ADC_LightPercent();
-        uint32_t off  = light_thr;
-        uint32_t on   = CFG_LIGHT_ON_PCT;
-        uint32_t span = (off > on) ? (off - on) : 1U;
-        uint8_t  n    = 0U;
-        uint8_t  b    = breath_level(now);
+        /* 越暗，依次点亮更多颗，并且都是呼吸状态（档位算法见 light_band_count） */
+        uint8_t n = light_band_count();
+        uint8_t b = breath_level(now);
 
-        if (p < off)
-        {
-            if      (p >= on + span * 2U / 3U) n = 1U;
-            else if (p >= on + span / 3U)      n = 2U;
-            else                               n = 3U;
-        }
         for (i = 0U; i < n; i++)
         {
             duty[i] = b;
@@ -304,8 +305,12 @@ static void draw_clock(void)
                     (mode == MODE_LIGHT) ? "LIGHT" : ((mode == MODE_THERMAL) ? "THERM" : "TIME "),
                     t_hour, t_min, t_sec);
         line_printf(1, "DATE 20%02d-%02d-%02d", t_year, t_month, t_day);
-        /* 当前值 / 阈值 一起显示 —— 一眼看出为什么灯没亮（档位没到） */
-        line_printf(2, "LGT %3d%%/THR%2d", BSP_ADC_LightPercent(), light_thr);
+        /* 和下一行同一套格式：值% 阈值 结果(该亮几颗)
+           LGT 77% T77 N0  /  TMP 48% M47 N0 */
+        line_printf(2, "LGT %3d%% T%2d N%d",
+                    (unsigned)BSP_ADC_LightPercent(),
+                    (unsigned)light_thr,
+                    light_band_count());
         if (locked)
         {
             show_line(3, "** LOCKED **");
@@ -347,7 +352,7 @@ static void draw_status(void)
                     (unsigned long)((up / 60U) % 60U),
                     (unsigned long)(up % 60U));
     }
-    line_printf(2, "LGT %3d%% THR%2d",
+    line_printf(2, "LGT %3d%% T%2d",
                 BSP_ADC_LightPercent(), light_thr);
     line_printf(3, "TMP %3d%% M%2dH%2d",
                 (unsigned)((uint32_t)BSP_ADC_GetRaw(BSP_ADC_CH_TEMP) * 100U / 4095U),
