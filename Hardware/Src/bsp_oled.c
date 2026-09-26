@@ -30,6 +30,12 @@ int BSP_OLED_Init(void)
     OLED_InitTypeDef init;
     int ret;
 
+    /* 一整屏 1024 字节，100kHz 要传 92ms，画面刷新会明显拖住主循环；
+       SSD1306 支持 400kHz，提到 400kHz 后一屏约 23ms（实测杜邦线也稳）。
+       若某批模块在 400kHz 下报 -1，改回 100000U 即可。 */
+    hi2c1.Init.ClockSpeed = 400000U;
+    (void)HAL_I2C_Init(&hi2c1);
+
     init.i2c_write_cb = OLED_I2C_Write;
 
     ret = OLED_Init(&g_oled, &init);

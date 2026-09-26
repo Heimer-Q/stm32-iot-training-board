@@ -52,6 +52,11 @@ def main():
     print(f"[ok] {args.port} 已打开 @{args.baudrate}"
           f"{'，正在复位目标…' if args.reset else ''}")
 
+    # 指定 -o 时边抓边落盘（flush），这样后台跑的时候可以随时看文件
+    out_file = None
+    if args.output:
+        out_file = open(args.output, "w", encoding="utf-8", buffering=1)
+
     if args.reset:
         time.sleep(0.2)          # 先确保串口已经在读
         target_reset()
@@ -64,8 +69,11 @@ def main():
         chunk = port.read(512)
         if chunk:
             buf += chunk
-            sys.stdout.write(chunk.decode("utf-8", "replace"))
+            text = chunk.decode("utf-8", "replace")
+            sys.stdout.write(text)
             sys.stdout.flush()
+            if out_file:
+                out_file.write(text)
         if args.send and not sent and time.time() >= send_at:
             port.write(args.send.encode("utf-8"))
             port.flush()
@@ -74,8 +82,8 @@ def main():
     port.close()
 
     print(f"\n[ok] 共收到 {len(buf)} 字节")
-    if args.output:
-        Path(args.output).write_bytes(bytes(buf))
+    if out_file:
+        out_file.close()
         print(f"[ok] 已写入 {args.output}")
 
 

@@ -1,16 +1,17 @@
 /**
   ******************************************************************************
   * @file    app_selftest.c
-  * @brief   00 板子自检：串口逐项报状态 + OLED 显示 + 按键验灯
+  * @brief   00 板子自检 + 按键控灯（两个画面）
   *
-  * 用法（讲给学生听）：
-  *   ① 板子不亮、屏不显、灯不对，先烧这个程序；
-  *   ② 串口（DEBUG 排针，115200）会逐项打印结果，哪项 FAIL 就先修哪一项；
-  *   ③ 屏上报的是同样的内容，测试时看不到屏就盯串口。
+  * 按键功能（2026-09-26 会长定稿）
+  *   K1 短按：切换画面        画面1 = 自检状态；画面2 = 时钟 + 光照 + 温度
+  *   K1 长按：光控灯模式开关（亮着的灯由光照强度控制，越暗越亮）
+  *   K2 短按：选灯——按一下换下一颗灯亮（单灯轮换）
+  *   K2 长按：三颗灯全亮（常亮）
+  *   K3 短按：当前亮着的灯 呼吸 ⇄ 常亮 切换
+  *   K3 长按：关闭所有灯
   *
-  * 学员要改的两处：
-  *   ① 把 K2 的功能改成"三个灯轮流亮一遍"；
-  *   ② 把心跳打印的间隔（CFG_SELFTEST_HEARTBEAT_MS）改短或改长。
+  * 串口（DEBUG 排针，115200）会打印每次按键动作和每秒心跳，调试靠它。
   ******************************************************************************
   */
 
@@ -20,27 +21,58 @@
 #include "bsp_key.h"
 #include "bsp_oled.h"
 #include "bsp_uart.h"
+#include "bsp_adc.h"
+#include "bsp_rtc.h"
 
-/* 屏幕行号（16 像素一行，共 4 行） */
-#define ST_LINE_TITLE   0
-#define ST_LINE_OLED    1
-#define ST_LINE_KEY     2
-#define ST_LINE_USER    3
+/* 屏幕：4 行（16 像素行高） */
+#define ST_LINE_0   0
+#define ST_LINE_1   1
+#define ST_LINE_2   2
+#define ST_LINE_3   3
 
-#define CFG_SELFTEST_HEARTBEAT_MS   2000U
+#define HEARTBEAT_MS   2000U
+
+typedef enum { SCR_STATUS = 0, SCR_CLOCK, SCR_NUM } ScreenId;
 
 static uint8_t  oled_ok;
 static uint16_t line_h;
-static uint32_t last_scan_tick;
-static uint32_t last_refresh_tick;
-static uint32_t last_heartbeat_tick;
-static uint8_t  last_keys;          /* bit0..2 = KEY1..3 当前状态，用于只在变化时打印 */
+static ScreenId screen = SCR_STATUS;
 
+/* ---- 灯的状态 ---- */
+static uint8_t lamp_all;        /* 1 = 三颗全亮 */
+static uint8_t lamp_on;         /* 1 = 单灯模式下有一颗亮着 */
+static uint8_t lamp_sel;        /* 单灯模式下选中的是第几颗（0..2） */
+static uint8_t lamp_breath;     /* 1 = 呼吸 */
+static uint8_t lamp_adc;        /* 1 = 光控（光照越暗越亮） */
+
+static uint32_t last_scan_tick;
+static uint32_t last_adc_tick;
+static uint32_t last_draw_tick;
+static uint32_t last_beat_tick;
+static uint8_t  last_keys;
+
+/* ------------------------------------------------------------------ */
 static void show_line(uint8_t row, const char *text)
 {
-    /* 注意：OLED 光标的 Y 是"基线"而不是行的上边缘，所以第 n 行的基线 = (n+1) × 行高 */
+    /* OLED 光标的 Y 是"基线"，所以第 n 行的基线 = (n+1) × 行高 */
     OLED_SetCursor(&g_oled, 0, (int16_t)((row + 1U) * line_h));
     OLED_DrawString(&g_oled, text);
+}
+
+static const char *temp_level_str(void)
+{
+    uint16_t raw = BSP_ADC_GetRaw(BSP_ADC_CH_TEMP);
+
+    if (raw < CFG_TEMP_LOW_MAX)  return "LOW";
+    if (raw < CFG_TEMP_MID_MAX)  return "MID";
+    return "HIGH";
+}
+
+static const char *lamp_mode_str(void)
+{
+    if (lamp_adc)    return "ADC";
+    if (lamp_breath) return "BREATH";
+    return "ON";
 }
 
 static uint8_t read_keys(void)
@@ -52,12 +84,116 @@ static uint8_t read_keys(void)
     return v;
 }
 
-/* OLED 起不来时用三个灯快闪报警（屏幕已经不亮了，只能靠灯） */
+/* 把"哪些灯亮、多亮"算出来写进 PWM */
+static void lamp_apply(void)
+{
+    uint8_t lit[LED_NUM];
+    uint32_t duty = 100U;      /* 基础亮度：100 = 常亮；光控时由光照决定 */
+
+    for (uint8_t i = 0U; i < LED_NUM; i++)
+    {
+        lit[i] = 0U;
+    }
+    if (lamp_all)
+    {
+        for (uint8_t i = 0U; i < LED_NUM; i++) lit[i] = 1U;
+    }
+    else if (lamp_on)
+    {
+        lit[lamp_sel % LED_NUM] = 1U;
+    }
+
+    if (lamp_adc)
+    {
+        uint32_t p = BSP_ADC_LightPercent();
+
+        if (p <= CFG_LAMP_ADC_DARK_MIN)
+        {
+            duty = 100U;
+        }
+        else if (p >= CFG_LAMP_ADC_BRIGHT_MAX)
+        {
+            duty = 0U;
+        }
+        else
+        {
+            duty = 100U - (p - CFG_LAMP_ADC_DARK_MIN) * 100U /
+                           (CFG_LAMP_ADC_BRIGHT_MAX - CFG_LAMP_ADC_DARK_MIN);
+        }
+    }
+
+    if (lamp_breath)
+    {
+        uint32_t t    = HAL_GetTick() % CFG_BREATH_PERIOD_MS;
+        uint32_t half = CFG_BREATH_PERIOD_MS / 2U;
+        uint32_t b    = (t < half) ? (t * 100U / half)
+                                   : ((CFG_BREATH_PERIOD_MS - t) * 100U / half);
+        duty = duty * b / 100U;
+    }
+
+    for (uint8_t i = 0U; i < LED_NUM; i++)
+    {
+        BSP_LED_SetPercent((uint8_t)i, lit[i] ? (uint8_t)duty : 0U);
+    }
+}
+
+/* 画当前画面（整屏重画：I2C 提到 400kHz 后一整屏约 23ms，够用） */
+static void screen_draw(void)
+{
+    uint8_t h = 0U, m = 0U, s = 0U;
+
+    if (!oled_ok)
+    {
+        return;
+    }
+
+    if (screen == SCR_STATUS)
+    {
+        show_line(ST_LINE_0, "SELFTEST  v0.4");
+        show_line(ST_LINE_1, "OLED : OK");
+        OLED_SetCursor(&g_oled, 0, (int16_t)(2U * line_h));
+        OLED_Printf(&g_oled, "KEY  : %d %d %d",
+                    BSP_KEY_IsPressed(BSP_KEY_1) ? 1 : 0,
+                    BSP_KEY_IsPressed(BSP_KEY_2) ? 1 : 0,
+                    BSP_KEY_IsPressed(BSP_KEY_3) ? 1 : 0);
+        BSP_OLED_ShowUserText(0, (int16_t)(4U * line_h));
+    }
+    else
+    {
+        BSP_RTC_Get(&h, &m, &s);
+        OLED_SetCursor(&g_oled, 0, (int16_t)(1U * line_h));
+        OLED_Printf(&g_oled, "TIME %02d:%02d:%02d", h, m, s);
+
+        OLED_SetCursor(&g_oled, 0, (int16_t)(2U * line_h));
+        OLED_Printf(&g_oled, "LIGHT %3d%%", BSP_ADC_LightPercent());
+
+        OLED_SetCursor(&g_oled, 0, (int16_t)(3U * line_h));
+        OLED_Printf(&g_oled, "TEMP %-4s %4d", temp_level_str(), BSP_ADC_GetRaw(BSP_ADC_CH_TEMP));
+
+        OLED_SetCursor(&g_oled, 0, (int16_t)(4U * line_h));
+        if (lamp_all)
+        {
+            OLED_Printf(&g_oled, "LAMP ALL %s", lamp_mode_str());
+        }
+        else if (lamp_on)
+        {
+            OLED_Printf(&g_oled, "LAMP %d %s", lamp_sel + 1, lamp_mode_str());
+        }
+        else
+        {
+            OLED_DrawString(&g_oled, "LAMP OFF");
+        }
+    }
+
+    BSP_OLED_Refresh();
+}
+
+/* OLED 起不来时用三个灯快闪报警 */
 static void oled_fail_blink(void)
 {
-    for (uint8_t n = 0; n < 3U; n++)
+    for (uint8_t n = 0U; n < 3U; n++)
     {
-        for (uint8_t i = 0; i < LED_NUM; i++)
+        for (uint8_t i = 0U; i < LED_NUM; i++)
         {
             BSP_LED_AllOff();
             BSP_LED_SetPercent(i, 100U);
@@ -72,118 +208,159 @@ void APP_SelfTest_Init(void)
     int ret;
 
     BSP_UART_Init();
-    BSP_UART_Printf("\r\n=== WULIAN TRAINING BOARD SELF TEST v0.3 ===\r\n");
-    BSP_UART_Printf("[sys ] clock 72MHz, debug uart 115200-8-N-1\r\n");
+    BSP_UART_Printf("\r\n=== WULIAN TRAINING BOARD DEMO v0.4 ===\r\n");
 
     BSP_LED_Init();
     BSP_KEY_Init();
+    BSP_ADC_Init();
+    BSP_RTC_Init();
     BSP_LED_AllOff();
-    BSP_UART_Printf("[led ] 3 LEDs init OK  (PA6/PA7/PB0, TIM3 PWM)\r\n");
 
-    BSP_UART_Printf("[key ] 3 keys init OK  (KEY1=PB12 KEY2=PB8 KEY3=PB9, active low)\r\n");
+    BSP_UART_Printf("[led ] 3 LEDs OK (PA6/PA7/PB0)\r\n");
+    BSP_UART_Printf("[key ] 3 keys OK (PB12/PB8/PB9), long press = %u ms\r\n", (unsigned)BSP_KEY_LONG_MS);
+    BSP_UART_Printf("[rtc ] %s\r\n", BSP_RTC_Valid() ? "valid (LSE 32768Hz)" : "NOT valid - LSE fail");
 
     ret = BSP_OLED_Init();
     oled_ok = (ret == 0) ? 1U : 0U;
-    if (oled_ok)
+    BSP_UART_Printf("[oled] init %s (ret=%d)\r\n", oled_ok ? "OK" : "FAIL", ret);
+    if (!oled_ok)
     {
-        BSP_UART_Printf("[oled] init OK  (I2C1 PB6/PB7, addr 0x3C)\r\n");
-    }
-    else
-    {
-        /* -1 = I2C 无应答（模块没插 / 接线 / 地址）；-2 = malloc 失败（堆不够，检查 startup 的 Heap_Size） */
-        BSP_UART_Printf("[oled] init FAIL ret=%d  (-1: I2C no ACK, -2: heap too small)\r\n", ret);
         oled_fail_blink();
     }
+
+    lamp_all = 0U; lamp_on = 0U; lamp_sel = 0U; lamp_breath = 0U; lamp_adc = 0U;
+    lamp_apply();
 
     if (oled_ok)
     {
         line_h = OLED_GetFontHeight(&g_oled);
-        if (line_h == 0U)
-        {
-            line_h = 16U;
-        }
-        show_line(ST_LINE_TITLE, "SELFTEST  v0.3");
-        show_line(ST_LINE_OLED,  "OLED : OK");
-        show_line(ST_LINE_KEY,   "KEY  : 0 0 0");
-        BSP_OLED_ShowUserText(0, (int16_t)((ST_LINE_USER + 1U) * line_h));
-        BSP_OLED_Refresh();
+        if (line_h == 0U) line_h = 16U;
+        OLED_Clear(&g_oled);
+        screen_draw();
     }
 
-    BSP_UART_Printf("[tips] press K1=all on, K2=middle on, K3=all off\r\n");
-    BSP_UART_Printf("=== self test done, heartbeat every %u ms ===\r\n", (unsigned)CFG_SELFTEST_HEARTBEAT_MS);
+    BSP_UART_Printf("[tips] K1=screen/adc-mode  K2=next lamp/all  K3=breath/off\r\n");
 
-    last_scan_tick      = HAL_GetTick();
-    last_refresh_tick   = last_scan_tick;
-    last_heartbeat_tick = last_scan_tick;
-    last_keys           = 0U;
+    last_scan_tick = HAL_GetTick();
+    last_adc_tick  = last_scan_tick;
+    last_draw_tick = last_scan_tick;
+    last_beat_tick = last_scan_tick;
+    last_keys      = 0U;
 }
 
 void APP_SelfTest_Process(void)
 {
-    char    buf[24];
     uint32_t now = HAL_GetTick();
     uint8_t  keys;
 
-    /* ---- 每 10ms 扫一次按键 ---- */
+    /* ---- 10ms：按键扫描 ---- */
     if (now - last_scan_tick >= CFG_KEY_SCAN_MS)
     {
         last_scan_tick += CFG_KEY_SCAN_MS;
         BSP_KEY_Scan();
     }
 
-    /* ---- 按键状态变化时：串口打印 + 点灯 ---- */
+    /* ---- 按键状态变化（给调试看） ---- */
     keys = read_keys();
     if (keys != last_keys)
     {
-        BSP_UART_Printf("[key ] state = %u%u%u  (K1 K2 K3)\r\n",
+        BSP_UART_Printf("[key ] %u%u%u\r\n",
                         (unsigned)((keys >> 0) & 1U),
                         (unsigned)((keys >> 1) & 1U),
                         (unsigned)((keys >> 2) & 1U));
         last_keys = keys;
     }
 
+    /* ---- K1：短按切画面 / 长按光控模式 ---- */
     if (BSP_KEY_WasClicked(BSP_KEY_1))
     {
-        for (uint8_t i = 0; i < LED_NUM; i++) BSP_LED_SetPercent(i, 100U);
-        BSP_UART_Printf("[led ] K1 -> all on\r\n");
+        screen = (ScreenId)((screen + 1U) % (uint8_t)SCR_NUM);
+        if (oled_ok)
+        {
+            OLED_Clear(&g_oled);      /* 换画面先清屏，避免残留 */
+        }
+        BSP_UART_Printf("[ui  ] screen -> %d\r\n", (int)screen);
     }
+    if (BSP_KEY_WasLongPressed(BSP_KEY_1))
+    {
+        lamp_adc = (uint8_t)(!lamp_adc);
+        if (lamp_adc && !lamp_all && !lamp_on)
+        {
+            lamp_on  = 1U;            /* 光控模式下总得有一盏灯给你控 */
+            lamp_sel = 0U;
+        }
+        BSP_UART_Printf("[lamp] ADC mode %s\r\n", lamp_adc ? "ON" : "OFF");
+    }
+
+    /* ---- K2：短按选下一颗灯 / 长按全亮 ---- */
     if (BSP_KEY_WasClicked(BSP_KEY_2))
     {
-        BSP_LED_AllOff();
-        BSP_LED_SetPercent(1, 100U);
-        BSP_UART_Printf("[led ] K2 -> middle on\r\n");
+        lamp_all = 0U;
+        lamp_adc = 0U;
+        if (lamp_on)
+        {
+            lamp_sel = (uint8_t)((lamp_sel + 1U) % LED_NUM);
+        }
+        else
+        {
+            lamp_sel = 0U;
+            lamp_on  = 1U;
+        }
+        BSP_UART_Printf("[lamp] next -> LED%d\r\n", lamp_sel + 1);
     }
+    if (BSP_KEY_WasLongPressed(BSP_KEY_2))
+    {
+        lamp_all    = 1U;
+        lamp_on     = 0U;
+        lamp_breath = 0U;
+        lamp_adc    = 0U;
+        BSP_UART_Printf("[lamp] ALL ON\r\n");
+    }
+
+    /* ---- K3：短按呼吸/常亮切换 / 长按全灭 ---- */
     if (BSP_KEY_WasClicked(BSP_KEY_3))
     {
-        BSP_LED_AllOff();
-        BSP_UART_Printf("[led ] K3 -> all off\r\n");
+        lamp_breath = (uint8_t)(!lamp_breath);
+        BSP_UART_Printf("[lamp] breath %s\r\n", lamp_breath ? "ON" : "OFF");
+    }
+    if (BSP_KEY_WasLongPressed(BSP_KEY_3))
+    {
+        lamp_all    = 0U;
+        lamp_on     = 0U;
+        lamp_breath = 0U;
+        lamp_adc    = 0U;
+        BSP_UART_Printf("[lamp] ALL OFF\r\n");
     }
 
-    /* ---- 心跳：证明程序还在跑（也方便你判断是"死机"还是"没输出"） ---- */
-    if (now - last_heartbeat_tick >= CFG_SELFTEST_HEARTBEAT_MS)
+    /* ---- 灯：每 10ms 重算一次（呼吸要平滑） ---- */
+    lamp_apply();
+
+    /* ---- 100ms：采样光敏/热敏 ---- */
+    if (now - last_adc_tick >= CFG_OLED_REFRESH_MS)
     {
-        last_heartbeat_tick += CFG_SELFTEST_HEARTBEAT_MS;
-        BSP_UART_Printf("[tick] %lu ms  keys=%u%u%u  oled=%s\r\n",
-                        (unsigned long)now,
-                        (unsigned)((keys >> 0) & 1U),
-                        (unsigned)((keys >> 1) & 1U),
-                        (unsigned)((keys >> 2) & 1U),
-                        oled_ok ? "OK" : "FAIL");
+        last_adc_tick += CFG_OLED_REFRESH_MS;
+        BSP_ADC_Process();
     }
 
-    /* ---- 屏幕：每 100ms 刷一次按键状态（屏没接就跳过） ---- */
-    if (oled_ok && (now - last_refresh_tick >= CFG_OLED_REFRESH_MS))
+    /* ---- 200ms：刷屏（画面2 时钟要跟着走） ---- */
+    if (oled_ok && (now - last_draw_tick >= 200U))
     {
-        last_refresh_tick += CFG_OLED_REFRESH_MS;
+        last_draw_tick += 200U;
+        screen_draw();
+    }
 
-        buf[0] = 'K'; buf[1] = 'E'; buf[2] = 'Y'; buf[3] = ' '; buf[4] = ' '; buf[5] = ':'; buf[6] = ' ';
-        buf[7]  = (char)('0' + (BSP_KEY_IsPressed(BSP_KEY_1) ? 1 : 0));
-        buf[8]  = ' ';
-        buf[9]  = (char)('0' + (BSP_KEY_IsPressed(BSP_KEY_2) ? 1 : 0));
-        buf[10] = ' ';
-        buf[11] = (char)('0' + (BSP_KEY_IsPressed(BSP_KEY_3) ? 1 : 0));
-        buf[12] = '\0';
-        show_line(ST_LINE_KEY, buf);
-        BSP_OLED_Refresh();
+    /* ---- 2s：串口心跳（含原始码，方便标定） ---- */
+    if (now - last_beat_tick >= HEARTBEAT_MS)
+    {
+        last_beat_tick += HEARTBEAT_MS;
+        BSP_UART_Printf("[tick] scr=%d key=%u%u%u lgt=%u%% rawL=%u rawT=%u lamp=%s%s%s\r\n",
+                        (int)screen,
+                        (unsigned)((keys >> 0) & 1U), (unsigned)((keys >> 1) & 1U), (unsigned)((keys >> 2) & 1U),
+                        (unsigned)BSP_ADC_LightPercent(),
+                        (unsigned)BSP_ADC_GetRaw(BSP_ADC_CH_LIGHT),
+                        (unsigned)BSP_ADC_GetRaw(BSP_ADC_CH_TEMP),
+                        lamp_all ? "ALL" : (lamp_on ? "ONE" : "OFF"),
+                        lamp_breath ? "+BREATH" : "",
+                        lamp_adc ? "+ADC" : "");
     }
 }
