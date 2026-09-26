@@ -6,13 +6,16 @@
        python Tools/make_font.py --ascii
    → Hardware/Inc/oled_font_ascii8x16.h  ，字体对象 font_ascii8x16
 
-2) 学生用：把自己的班级 / 姓名做成字库（只收你写的这些字）
+2) 学生用：把自己的班级 / 姓名 / 要显示的整句话做成字库
        python Tools/make_font.py "物联本251周志勤"
+       python Tools/make_font.py "温度 %.1fC|光照 %d%%|时间 %02d:%02d"
+     （多句话用 | 分开，每句会生成一个宏 USER_TEXT_1 / USER_TEXT_2 …）
    → Hardware/Inc/oled_font_user.h       ，字体对象 font_user
-     同时生成 USER_FONT_TEXT（UTF-8 转义写法，避免源码编码问题），用法：
+     同时生成文本宏（UTF-8 转义写法，避免源码编码问题），用法：
        OLED_SetFont(&g_oled, &font_user);
        OLED_SetCursor(&g_oled, 0, 16);
-       OLED_DrawString(&g_oled, USER_FONT_TEXT);
+       OLED_DrawString(&g_oled, USER_TEXT_1);          // 纯文字
+       OLED_Printf(&g_oled, USER_TEXT_2, 27.5f);       // 带数字
 
 参数
 ----
@@ -39,6 +42,9 @@ INC_DIR = ROOT / "Hardware" / "Inc"
 ASCII_FONT_CANDIDATES = ["consolab.ttf", "consola.ttf", "courbd.ttf", "arialbd.ttf"]
 CJK_FONT_CANDIDATES = ["simhei.ttf", "msyh.ttc", "simsun.ttc", "simkai.ttf"]
 THRESHOLD = 96          # 灰度阈值：越大字越细
+
+# 中文字库默认附带这些"常用符号"：不然运行时显示的数字/百分号会查不到字模变成空白
+AUTO_SYMBOLS = "0123456789:%.+-/ CF"
 
 # 基线在格子里的行号：基线之上放字身，基线之下留给 g/p/y 的下伸部分。
 # 英文用 13（下面留 3 行），中文用 14（汉字几乎不下伸，把字身撑满 16 像素更清楚）。
@@ -112,11 +118,15 @@ def pack(cell):
 
 
 def c_escape(text):
-    """把文本转成 UTF-8 的 C 转义字符串，避免源码编码影响 Keil 编译。"""
-    return "".join("\\x%02X" % b for b in text.encode("utf-8"))
+    """把文本转成 UTF-8 的八进制转义字符串。
+
+    用八进制（固定 3 位）而不是 \\x：\\x 转义是贪婪的，后面紧跟数字/字母时会被吃掉，
+    例如 "温度C" 的最后一个字节后面接 C，\\x 写法就会解析错。
+    """
+    return "".join("\\%03o" % b for b in text.encode("utf-8"))
 
 
-def build_header(symbol, font_name, font_path, size, chars, cell_w, cell_h, baseline_row, extra_define=None):
+def build_header(symbol, font_name, font_path, size, chars, cell_w, cell_h, baseline_row, texts=None):
     font = ImageFont.truetype(font_path, size)
     glyphs = [(ord(ch), ch, pack(render_cell(font, ch, cell_w, cell_h, baseline_row))) for ch in chars]
 
@@ -138,9 +148,13 @@ def build_header(symbol, font_name, font_path, size, chars, cell_w, cell_h, base
     L.append('#include "oled_font.h"')
     L.append("")
 
-    if extra_define:
-        L.append("/* 直接给 OLED_DrawString 用的文本（UTF-8 转义，不受源码编码影响） */")
-        L.append(f'#define USER_FONT_TEXT "{c_escape(extra_define)}"   /* {extra_define} */')
+    if texts:
+        L.append("/* 直接给 OLED_DrawString / OLED_Printf 用的文本（UTF-8 八进制转义，不受源码编码影响）")
+        L.append("   注意：屏幕上要显示的字，必须出现在生成字库时写的那几句话里 */")
+        for i, t in enumerate(texts, 1):
+            L.append(f'#define USER_TEXT_{i} "{c_escape(t)}"   /* {t} */')
+        L.append("")
+        L.append("#define USER_FONT_TEXT USER_TEXT_1   /* 兼容旧写法：默认显示第一句 */")
         L.append("")
 
     L.append("/* ---- 字形位图 ---- */")
@@ -238,25 +252,28 @@ def main():
         font_name = "ASCII 8x16"
         extra = None
         preview_lines = ["SELFTEST  v0.2", "OLED : OK", "KEY  : 0 0 0", "TEMP 27.5C"]
+        texts = None
     else:
         if not args.text:
             ap.error("要么加 --ascii 生成英文，要么写一段文字（例如：python Tools/make_font.py 周志勤）")
-        chars = unique_chars(args.text)
+        texts = [t for t in args.text.split("|") if t != ""]
+        chars = unique_chars("".join(texts) + AUTO_SYMBOLS)   # 自动补常用数字与符号
         cell_w, cell_h = 16, 16
         symbol = "font_user"
         font_path = args.font or find_font(CJK_FONT_CANDIDATES)
         out = INC_DIR / "oled_font_user.h"
         font_name = "USER 16x16"
-        extra = args.text
         per_line = 128 // cell_w
-        preview_lines = [args.text[i:i + per_line] for i in range(0, len(args.text), per_line)]
+        preview_lines = []
+        for t in texts:
+            preview_lines += [t[i:i + per_line] for i in range(0, len(t), per_line)]
 
     if not font_path or not Path(font_path).exists():
         raise SystemExit("找不到字体文件，用 --font 指定，例如 --font C:\\Windows\\Fonts\\simhei.ttf")
 
     baseline_row = BASELINE_ROW_ASCII if args.ascii else BASELINE_ROW_CJK
     size = args.size or pick_size(font_path, chars, cell_w, cell_h, baseline_row)
-    header = build_header(symbol, font_name, font_path, size, chars, cell_w, cell_h, baseline_row, extra)
+    header = build_header(symbol, font_name, font_path, size, chars, cell_w, cell_h, baseline_row, texts)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(header, encoding="utf-8")
 
@@ -276,7 +293,11 @@ def main():
     else:
         print("用法：OLED_SetFont(&g_oled, &font_user);")
         print('      OLED_SetCursor(&g_oled, 0, 16);')
-        print("      OLED_DrawString(&g_oled, USER_FONT_TEXT);")
+        for i, t in enumerate(texts, 1):
+            if "%" in t:
+                print(f"      OLED_Printf(&g_oled, USER_TEXT_{i}, ...);   /* {t} */")
+            else:
+                print(f"      OLED_DrawString(&g_oled, USER_TEXT_{i});   /* {t} */")
 
 
 if __name__ == "__main__":
