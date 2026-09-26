@@ -35,3 +35,4 @@ Desktop.ini
 # 字库脚本的逐人预览图（生成物，不进版本库；总览图保留）
 Tools/preview_*.png
 Tools/预览_*.png
+__pycache__/
