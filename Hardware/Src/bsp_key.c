@@ -107,6 +107,7 @@ static void key_tick(void)
                 }
                 else if (key[i].tick < BSP_KEY_CLICK_MAX_TICKS)
                 {
+                    /* 照文档：先进"双击判断"，等 15 拍（150ms）没第二下才报单击 */
                     key[i].state = KS_DOUBLE_WAIT;
                     key[i].tick  = 0U;
                 }
@@ -128,7 +129,7 @@ static void key_tick(void)
             }
             else if (++key[i].tick >= BSP_KEY_DOUBLE_TICKS)
             {
-                key[i].event = BSP_KEY_EVENT_CLICK;   /* 等够 150ms 没第二下 → 单击 */
+                key[i].event = BSP_KEY_EVENT_CLICK;  /* 等够 150ms 没第二下 → 单击 */
                 key[i].state = KS_IDLE;
                 key[i].tick  = 0U;
             }

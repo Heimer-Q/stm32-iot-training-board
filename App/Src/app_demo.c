@@ -281,16 +281,24 @@ static void draw_clock(void)
     else
     {
         rtc_load();
-        line_printf(0, "TIME %02d:%02d:%02d", t_hour, t_min, t_sec);
+        /* 第一行左边顺便报当前模式（光控/热控时一眼能看到） */
+        line_printf(0, "%s %02d:%02d:%02d",
+                    (mode == MODE_LIGHT) ? "LIGHT" : ((mode == MODE_THERMAL) ? "THERM" : "TIME "),
+                    t_hour, t_min, t_sec);
         line_printf(1, "DATE 20%02d-%02d-%02d", t_year, t_month, t_day);
-        line_printf(2, "LGT %3d%% TMP %4d", BSP_ADC_LightPercent(), BSP_ADC_GetRaw(BSP_ADC_CH_TEMP));
+        /* 当前值 / 阈值 一起显示 —— 一眼看出为什么灯没亮（档位没到） */
+        line_printf(2, "LGT %3d%%/THR%2d", BSP_ADC_LightPercent(), light_thr);
         if (locked)
         {
             show_line(3, "** LOCKED **");
         }
         else
         {
-            line_printf(3, "LAMP %s %s", mode_name(), temp_level_str());
+            /* 温度：当前百分比 + 中温阈值 + 当前档位（LOW/MID/HIGH） */
+            line_printf(3, "TMP %3d%% M%2d %s",
+                        (unsigned)((uint32_t)BSP_ADC_GetRaw(BSP_ADC_CH_TEMP) * 100U / 4095U),
+                        (unsigned)(temp_mid * 100U / 4095U),
+                        temp_level_str());
         }
     }
 }
@@ -321,10 +329,12 @@ static void draw_status(void)
                     (unsigned long)((up / 60U) % 60U),
                     (unsigned long)(up % 60U));
     }
-    line_printf(2, "LGT %3d%% THR %2d", BSP_ADC_LightPercent(), light_thr);
-    line_printf(3, "TMP%4d M%02d H%02d",
-                BSP_ADC_GetRaw(BSP_ADC_CH_TEMP),
-                temp_mid / 100U, temp_high / 100U);
+    line_printf(2, "LGT %3d%% THR%2d",
+                BSP_ADC_LightPercent(), light_thr);
+    line_printf(3, "TMP %3d%% M%2dH%2d",
+                (unsigned)((uint32_t)BSP_ADC_GetRaw(BSP_ADC_CH_TEMP) * 100U / 4095U),
+                (unsigned)(temp_mid * 100U / 4095U),
+                (unsigned)(temp_high * 100U / 4095U));
 }
 
 static void screen_draw(void)
