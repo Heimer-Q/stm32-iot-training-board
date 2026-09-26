@@ -7,10 +7,10 @@
   *   K1 短按：切画面（时钟 → 图片 → 状态）
   *   K1 长按：锁屏 / 解锁（锁屏后除 K1 长按外全部忽略）
   *   K1 双击：模式循环（手动 → 光控 → 热控）
-  *   K2 短按：选下一颗灯 / 图片页上一张 / 光控阈值−1 / 热控中温阈值−50 / 时间设置单位−1
+  *   K2 短按：选下一颗灯 / 图片页动图变慢 / 光控阈值−1 / 热控中温阈值−50 / 时间设置单位−1
   *   K2 长按：**全亮 ⇄ 全灭（同一个键切换）** / 光控阈值−10 / 热控中温阈值−200
   *   K2 双击：流水灯开/关（手动模式）
-  *   K3 短按：呼吸⇄常亮 / 图片页下一张 / 光控阈值+1 / 热控高温阈值+50 / 时间设置单位+1
+  *   K3 短按：呼吸⇄常亮 / 图片页动图变快 / 光控阈值+1 / 热控高温阈值+50 / 时间设置单位+1
   *   K3 长按：**进入 / 退出时间设置**（会自动切到时钟页）；光控阈值+10 / 热控高温阈值+200
   *   K3 双击：阈值一键恢复默认（光控 40%、热控 1900/2300）
   *
@@ -32,7 +32,7 @@
 #include "bsp_uart.h"
 #include "bsp_adc.h"
 #include "bsp_rtc.h"
-#include "oled_images.h"
+#include "oled_gif.h"          /* 动图（Tools/make_gif.py 生成） */
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -47,7 +47,9 @@ static WorkMode mode     = MODE_NORMAL;
 static uint8_t  locked;
 static uint8_t  time_set;
 static uint8_t  time_unit;
-static uint8_t  img_idx;
+static uint8_t  gif_frame;                              /* 当前动图帧号 */
+static uint16_t gif_delay_ms = OLED_GIF_DELAY_MS;       /* 每帧时长，可在图片页用按键调 */
+static uint32_t t_gif;
 
 /* 灯 */
 static uint8_t lamp_sel, lamp_all, lamp_on, lamp_breath, lamp_flow;
@@ -334,8 +336,11 @@ static void draw_clock(void)
 
 static void draw_image(void)
 {
-    OLED_SetCursor(&g_oled, 0, 0);
-    OLED_DrawBitmap(&g_oled, OLED_IMG_W, OLED_IMG_H, OLED_IMG[img_idx % OLED_IMG_COUNT]);
+    /* 动图：每帧整屏重画，先清屏避免上一帧残留 */
+    OLED_Clear(&g_oled);
+    OLED_SetCursor(&g_oled, (int16_t)((128 - (int16_t)OLED_GIF_W) / 2),
+                            (int16_t)((64 - (int16_t)OLED_GIF_H) / 2));
+    OLED_DrawBitmap(&g_oled, OLED_GIF_W, OLED_GIF_H, OLED_GIF[gif_frame % OLED_GIF_COUNT]);
     if (locked)
     {
         show_line(0, "** LOCKED **");
@@ -478,18 +483,18 @@ static void handle_keys(void)
         return;
     }
 
-    /* ---------- 图片页：K2 上一张 / K3 下一张 ---------- */
+    /* ---------- 图片页：K2 慢一点 / K3 快一点（动图播放速度） ---------- */
     if (screen == SCR_IMAGE)
     {
-        if (e2 == BSP_KEY_EVENT_CLICK)
+        if (e2 == BSP_KEY_EVENT_CLICK)                 /* 慢 */
         {
-            img_idx = (uint8_t)((img_idx + OLED_IMG_COUNT - 1U) % OLED_IMG_COUNT);
-            BSP_UART_Printf("[img ] -> %d\r\n", img_idx + 1);
+            gif_delay_ms = (uint16_t)((gif_delay_ms < 400U) ? (gif_delay_ms + 20U) : 400U);
+            BSP_UART_Printf("[gif ] delay %u ms\r\n", gif_delay_ms);
         }
-        if (e3 == BSP_KEY_EVENT_CLICK)
+        if (e3 == BSP_KEY_EVENT_CLICK)                 /* 快 */
         {
-            img_idx = (uint8_t)((img_idx + 1U) % OLED_IMG_COUNT);
-            BSP_UART_Printf("[img ] -> %d\r\n", img_idx + 1);
+            gif_delay_ms = (uint16_t)((gif_delay_ms > 30U) ? (gif_delay_ms - 20U) : 30U);
+            BSP_UART_Printf("[gif ] delay %u ms\r\n", gif_delay_ms);
         }
         return;
     }
@@ -606,7 +611,9 @@ void APP_Demo_Init(void)
     rtc_load();
     BSP_UART_Printf("[rtc ] %02d:%02d:%02d 20%02d-%02d-%02d\r\n",
                     t_hour, t_min, t_sec, t_year, t_month, t_day);
-    BSP_UART_Printf("[img ] %d images, %d bytes\r\n", OLED_IMG_COUNT, OLED_IMG_W / 8 * OLED_IMG_H);
+    BSP_UART_Printf("[gif ] %d frames %dx%d, %d bytes, %u ms/frame\r\n",
+                    OLED_GIF_COUNT, OLED_GIF_W, OLED_GIF_H,
+                    OLED_GIF_W / 8 * OLED_GIF_H * OLED_GIF_COUNT, gif_delay_ms);
     BSP_UART_Printf("[tips] K1 screen/hold=lock/double=mode | K2 sel/all/flow | K3 breath/off/set-time\r\n");
 
     lamp_sel = 0U; lamp_all = 0U; lamp_on = 0U; lamp_breath = 0U; lamp_flow = 0U;
@@ -614,6 +621,8 @@ void APP_Demo_Init(void)
 
     boot_ms = HAL_GetTick();
     t_adc = t_draw = t_beat = boot_ms;
+    t_gif = boot_ms;
+    gif_frame = 0U;
 
     if (oled_ok)
     {
@@ -636,7 +645,17 @@ void APP_Demo_Process(void)
         BSP_ADC_Process();
     }
 
-    if (oled_ok && (now - t_draw >= 200U))
+    if (oled_ok && (screen == SCR_IMAGE))
+    {
+        /* 动图：按 gif_delay_ms 逐帧推进（图片页专用节拍） */
+        if (now - t_gif >= gif_delay_ms)
+        {
+            t_gif = now;
+            gif_frame = (uint8_t)((gif_frame + 1U) % OLED_GIF_COUNT);
+            screen_draw();
+        }
+    }
+    else if (oled_ok && (now - t_draw >= 200U))
     {
         t_draw += 200U;
         screen_draw();
