@@ -34,4 +34,11 @@ void BSP_OLED_ShowUserText(int16_t x, int16_t baseline_y);
    字库生成时用 | 分隔多行，例如：python Tools/make_font.py "哲学本263|陈桂林" */
 void BSP_OLED_ShowUserLine(uint8_t idx, int16_t x, int16_t baseline_y);
 
+/* 同上，但水平居中（按当前字体的实际字符串宽度算） */
+void BSP_OLED_ShowUserLineCenter(uint8_t idx, int16_t baseline_y);
+
+/* 中文标签 + 后面接一段英文/数字，整体水平居中
+   例：BSP_OLED_ShowUserLineWithText(3, " 2026-09-26", y) → 显示 "固件 2026-09-26" */
+void BSP_OLED_ShowUserLineWithText(uint8_t idx, const char *tail, int16_t baseline_y);
+
 #endif /* __BSP_OLED_H */

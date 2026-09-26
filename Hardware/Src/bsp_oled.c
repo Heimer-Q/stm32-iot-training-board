@@ -5,6 +5,9 @@
         否则链接会报 L6200E: Symbol ... multiply defined。 */
 #include "oled_font_user.h"
 
+/* 8×16 英文字库定义在 oled.c 里（那边只能被一个 .c 包含，这里只做外部声明） */
+extern const Font_TypeDef font_ascii8x16;
+
 /* 本板 OLED 挂在硬件 I2C1 上（PB6/PB7），地址 7 位 0x3C
    —— 铁头山羊的驱动用 8 位写法 0x78（0x3C<<1），HAL 也收 8 位写法，不用换算 */
 #define BSP_OLED_I2C      (&hi2c1)
@@ -102,5 +105,65 @@ void BSP_OLED_ShowUserLine(uint8_t idx, int16_t x, int16_t baseline_y)
     OLED_SetFont(&g_oled, &font_user);
     OLED_SetCursor(&g_oled, x, baseline_y);
     OLED_DrawString(&g_oled, text);
+    OLED_SetFont(&g_oled, keep);
+}
+
+void BSP_OLED_ShowUserLineCenter(uint8_t idx, int16_t baseline_y)
+{
+    const Font_TypeDef *keep = g_oled.Font;
+    const char *text;
+    uint16_t w;
+
+    switch (idx)
+    {
+        case 1U:  text = USER_TEXT_2; break;
+        case 2U:  text = USER_TEXT_3; break;
+        default:  text = USER_TEXT_1; break;
+    }
+
+    OLED_SetFont(&g_oled, &font_user);
+    w = OLED_GetStrWidth(&g_oled, text);          /* 中文一行 16 像素/字 */
+    OLED_SetCursor(&g_oled, (int16_t)((128 - (int16_t)w) / 2), baseline_y);
+    OLED_DrawString(&g_oled, text);
+    OLED_SetFont(&g_oled, keep);
+}
+
+void BSP_OLED_ShowUserLineWithText(uint8_t idx, const char *tail, int16_t baseline_y)
+{
+    const Font_TypeDef *keep = g_oled.Font;
+    const char *cn;
+    uint16_t w_cn, w_tail = 0U, total;
+    int16_t  x;
+
+    switch (idx)
+    {
+        case 1U:  cn = USER_TEXT_2; break;
+        case 2U:  cn = USER_TEXT_3; break;
+        default:  cn = USER_TEXT_1; break;
+    }
+
+    OLED_SetFont(&g_oled, &font_user);
+    w_cn = OLED_GetStrWidth(&g_oled, cn);
+
+    if ((tail != 0) && (tail[0] != '\0'))
+    {
+        OLED_SetFont(&g_oled, &font_ascii8x16);
+        w_tail = OLED_GetStrWidth(&g_oled, tail);
+    }
+
+    total = (uint16_t)(w_cn + w_tail);
+    x     = (int16_t)((128 - (int16_t)total) / 2);
+
+    OLED_SetFont(&g_oled, &font_user);
+    OLED_SetCursor(&g_oled, x, baseline_y);
+    OLED_DrawString(&g_oled, cn);
+
+    if (w_tail != 0U)
+    {
+        OLED_SetFont(&g_oled, &font_ascii8x16);
+        OLED_SetCursor(&g_oled, (int16_t)(x + (int16_t)w_cn), baseline_y);
+        OLED_DrawString(&g_oled, tail);
+    }
+
     OLED_SetFont(&g_oled, keep);
 }

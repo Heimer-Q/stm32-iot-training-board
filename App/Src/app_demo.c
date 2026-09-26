@@ -38,11 +38,13 @@
 #include <stdio.h>
 
 /* ------------------------------- 状态 ------------------------------- */
-typedef enum { SCR_CLOCK = 0, SCR_IMAGE, SCR_STATUS, SCR_INFO, SCR_NUM } ScreenId;
+/* 画面顺序（也是 K1 短按的循环顺序 + 上电默认停在第一页）
+   0 信息页（班级+姓名）→ 1 系统状态页 → 2 时钟页 → 3 图片页（动图） */
+typedef enum { SCR_INFO = 0, SCR_STATUS, SCR_CLOCK, SCR_IMAGE, SCR_NUM } ScreenId;
 typedef enum { MODE_NORMAL = 0, MODE_LIGHT, MODE_THERMAL, MODE_NUM } WorkMode;
 enum { TU_YEAR = 0, TU_MONTH, TU_DAY, TU_HOUR, TU_MIN, TU_SEC, TU_NUM };
 
-static ScreenId screen   = SCR_CLOCK;
+static ScreenId screen   = SCR_INFO;
 static WorkMode mode     = MODE_NORMAL;
 static uint8_t  locked;
 static uint8_t  time_set;
@@ -87,6 +89,15 @@ static void line_printf(uint8_t row, const char *fmt, ...)
     (void)vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     show_line(row, buf);
+}
+
+/* 居中的一行（信息页用：按当前字体实际宽度算 x） */
+static void show_line_center(uint8_t row, const char *text)
+{
+    uint16_t w = OLED_GetStrWidth(&g_oled, text);
+
+    OLED_SetCursor(&g_oled, (int16_t)((128 - (int16_t)w) / 2), (int16_t)((row + 1U) * line_h));
+    OLED_DrawString(&g_oled, text);
 }
 
 /* 呼吸：0→100→0，周期 CFG_BREATH_PERIOD_MS */
@@ -402,18 +413,22 @@ static void draw_info(void)
     uint8_t day = (uint8_t)(((( __DATE__[4] == ' ') ? 0 : (__DATE__[4] - '0')) * 10)
                             + (__DATE__[5] - '0'));
 
-    BSP_OLED_ShowUserLine(0U, 0, (int16_t)(1U * line_h));   /* 例如 哲学本263 */
-    BSP_OLED_ShowUserLine(1U, 0, (int16_t)(2U * line_h));   /* 例如 陈桂林     */
+    /* 四行全部水平居中 */
+    BSP_OLED_ShowUserLineCenter(0U, (int16_t)(1U * line_h));   /* 例如 哲学本263   */
+    BSP_OLED_ShowUserLineCenter(1U, (int16_t)(2U * line_h));   /* 例如 陈桂林      */
 
     if (locked)
     {
-        show_line(3U, "** LOCKED **");
+        show_line_center(3U, "** LOCKED **");
     }
     else
     {
-        show_line(2U, "WULIAN IOT ASSOC");
-        line_printf(3U, "FW 20%c%c-%02d-%02d",
-                    __DATE__[9], __DATE__[10], month_num(__DATE__), day);
+        char buf[20];
+        BSP_OLED_ShowUserLineCenter(2U, (int16_t)(3U * line_h));   /* 例如 物联网协会 */
+        /* VER = version，版本日期（编译时刻） */
+        (void)snprintf(buf, sizeof(buf), "VER 20%c%c-%02d-%02d",
+                       __DATE__[9], __DATE__[10], month_num(__DATE__), day);
+        show_line_center(3U, buf);
     }
 }
 
@@ -681,7 +696,7 @@ void APP_Demo_Init(void)
     BSP_UART_Printf("[tips] K1 screen/hold=lock/double=mode | K2 sel/all/flow | K3 breath/off/set-time\r\n");
 
     lamp_sel = 0U; lamp_all = 0U; lamp_on = 0U; lamp_breath = 0U; lamp_flow = 0U;
-    screen = SCR_CLOCK; mode = MODE_NORMAL; locked = 0U; time_set = 0U;
+    screen = SCR_INFO; mode = MODE_NORMAL; locked = 0U; time_set = 0U;
 
     boot_ms = HAL_GetTick();
     t_adc = t_draw = t_beat = boot_ms;
