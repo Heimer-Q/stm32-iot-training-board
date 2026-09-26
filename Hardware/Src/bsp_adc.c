@@ -6,9 +6,11 @@
  *    - 手电照着读到的原始码   → LIGHT_RAW_BRIGHT
  *    - LIGHT_INVERT：读数越小越亮就填 1，越大越亮就填 0
  * ==========================================================================*/
+/* 实测（2026-09-26）：本模块是"越亮读数越小"，所以要反转；
+   反转后 = 会长说的 (1 - 原值)：室内灯下 rawL≈1050 → 77%，手遮住 rawL≈2600 → 27% */
 #define LIGHT_RAW_DARK     300U
 #define LIGHT_RAW_BRIGHT   3500U
-#define LIGHT_INVERT       0U
+#define LIGHT_INVERT       1U
 
 #define ADC_FILTER_N       8U          /* 滑动平均窗口：越大越稳、响应越慢 */
 

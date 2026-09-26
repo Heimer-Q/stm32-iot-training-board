@@ -8,11 +8,15 @@
   *   K1 长按：锁屏 / 解锁（锁屏后除 K1 长按外全部忽略）
   *   K1 双击：模式循环（手动 → 光控 → 热控）
   *   K2 短按：选下一颗灯 / 图片页上一张 / 光控阈值−1 / 热控中温阈值−50 / 时间设置单位−1
-  *   K2 长按：三灯全选 / 光控阈值−10 / 热控中温阈值−200
+  *   K2 长按：**全亮 ⇄ 全灭（同一个键切换）** / 光控阈值−10 / 热控中温阈值−200
   *   K2 双击：流水灯开/关（手动模式）
   *   K3 短按：呼吸⇄常亮 / 图片页下一张 / 光控阈值+1 / 热控高温阈值+50 / 时间设置单位+1
-  *   K3 长按：全灭 / 光控阈值+10 / 热控高温阈值+200
-  *   K3 双击：时钟页进入/退出时间设置（加减立即写回 RTC）
+  *   K3 长按：**进入 / 退出时间设置**（会自动切到时钟页）；光控阈值+10 / 热控高温阈值+200
+  *   K3 双击：阈值一键恢复默认（光控 40%、热控 1900/2300）
+  *
+  * 时间设置里：
+  *   K1 短按 = 六个单位循环（年→月→日→时→分→秒→年），K1 长按 = 退出；
+  *   K2/K3 = 当前单位 −1/+1（长按连调），**每改一次立即写回 RTC**。
   ******************************************************************************
   */
 
@@ -45,9 +49,9 @@ static uint8_t  img_idx;
 static uint8_t lamp_sel, lamp_all, lamp_on, lamp_breath, lamp_flow;
 
 /* 阈值（按键可调） */
-static uint8_t  light_thr = 40U;      /* 光控：低于这个光照百分比开始点灯 */
-static uint16_t temp_mid  = 1900U;    /* 热控中温阈值（原始码） */
-static uint16_t temp_high = 2300U;    /* 热控高温阈值 */
+static uint8_t  light_thr = CFG_LIGHT_THR_DEFAULT;   /* 光控：低于这个光照百分比开始点灯 */
+static uint16_t temp_mid  = CFG_TEMP_MID;    /* 热控中温阈值（原始码，越大越冷） */
+static uint16_t temp_high = CFG_TEMP_HIGH;   /* 热控高温阈值（比中温更小） */
 
 /* 时间影子（改完立即写 RTC） */
 static uint8_t t_year, t_month, t_day, t_hour, t_min, t_sec;
@@ -112,8 +116,13 @@ static const char *temp_level_str(void)
 {
     uint16_t raw = BSP_ADC_GetRaw(BSP_ADC_CH_TEMP);
 
+#if CFG_TEMP_INVERT
+    if (raw <= temp_high) return "HIGH";
+    if (raw <= temp_mid)  return "MID";
+#else
     if (raw >= temp_high) return "HIGH";
     if (raw >= temp_mid)  return "MID";
+#endif
     return "LOW";
 }
 
@@ -137,9 +146,9 @@ static void lamp_update(void)
         uint8_t  n   = 0U;
         uint8_t  b   = breath_level(now);
 
-        if (p < thr)             n = 1U;
-        if (p + 15U < thr)       n = 2U;
-        if (p + 30U < thr)       n = 3U;
+        if (p < thr)                            n = 1U;
+        if (p + CFG_LIGHT_THR_STEP < thr)       n = 2U;
+        if (p + CFG_LIGHT_THR_STEP * 2U < thr)  n = 3U;
         for (i = 0U; i < n; i++)
         {
             duty[i] = b;
@@ -150,11 +159,19 @@ static void lamp_update(void)
         uint16_t raw   = BSP_ADC_GetRaw(BSP_ADC_CH_TEMP);
         uint8_t  blink = blink_level(now);
 
-        if (raw >= temp_high)             /* 高温：三颗一起闪 */
+#if CFG_TEMP_INVERT
+        if (raw <= temp_high)             /* 高温：三颗一起闪（越热读数越小） */
         {
             for (i = 0U; i < LED_NUM; i++) duty[i] = blink;
         }
-        else if (raw >= temp_mid)         /* 中温：单颗闪 */
+        else if (raw <= temp_mid)         /* 中温：单颗闪 */
+#else
+        if (raw >= temp_high)
+        {
+            for (i = 0U; i < LED_NUM; i++) duty[i] = blink;
+        }
+        else if (raw >= temp_mid)
+#endif
         {
             duty[lamp_sel % LED_NUM] = blink;
         }
@@ -237,6 +254,8 @@ static void time_step(int32_t delta)
         default: break;
     }
     rtc_store();
+    BSP_UART_Printf("[time] 20%02d-%02d-%02d %02d:%02d:%02d\r\n",
+                    t_year, t_month, t_day, t_hour, t_min, t_sec);
 }
 
 /* ------------------------------ 画面 ------------------------------ */
@@ -365,12 +384,9 @@ static void handle_keys(void)
     case BSP_KEY_EVENT_CLICK:
         if (time_set)
         {
-            if (++time_unit >= TU_NUM)     /* 转完一圈自动退出 */
-            {
-                time_unit = 0U;
-                time_set  = 0U;
-                BSP_UART_Printf("[time] exit set\r\n");
-            }
+            /* 六个单位循环切换（年→月→日→时→分→秒→年…）；退出只认 K1 长按 */
+            time_unit = (uint8_t)((time_unit + 1U) % TU_NUM);
+            BSP_UART_Printf("[time] unit -> %s\r\n", unit_name());
         }
         else
         {
@@ -407,6 +423,11 @@ static void handle_keys(void)
     {
         if ((e2 == BSP_KEY_EVENT_CLICK) || (e2 == BSP_KEY_EVENT_LONG_REPEAT)) time_step(-1);
         if ((e3 == BSP_KEY_EVENT_CLICK) || (e3 == BSP_KEY_EVENT_LONG_REPEAT)) time_step(+1);
+        if (e3 == BSP_KEY_EVENT_LONG)              /* K3 长按 = 退出时间设置 */
+        {
+            time_set = 0U;
+            BSP_UART_Printf("[time] exit set (K3 hold)\r\n");
+        }
         return;
     }
 
@@ -445,10 +466,17 @@ static void handle_keys(void)
         if (e2 == BSP_KEY_EVENT_LONG)        temp_mid = (uint16_t)((temp_mid > 300U) ? (temp_mid - 200U) : 100U);
         if (e2 == BSP_KEY_EVENT_CLICK)       temp_mid = (uint16_t)((temp_mid > 100U) ? (temp_mid - 50U)  : 100U);
         if (e2 == BSP_KEY_EVENT_LONG_REPEAT) temp_mid = (uint16_t)((temp_mid > 100U) ? (temp_mid - 50U)  : 100U);
+#if CFG_TEMP_INVERT
+        if (e3 == BSP_KEY_EVENT_LONG)        temp_high = (uint16_t)((temp_high > 200U) ? (temp_high - 200U) : 100U);
+        if (e3 == BSP_KEY_EVENT_CLICK)       temp_high = (uint16_t)((temp_high > 100U) ? (temp_high - 50U)  : 100U);
+        if (e3 == BSP_KEY_EVENT_LONG_REPEAT) temp_high = (uint16_t)((temp_high > 100U) ? (temp_high - 50U)  : 100U);
+        if (temp_high >= temp_mid)           temp_high = (uint16_t)((temp_mid > 200U) ? (temp_mid - 100U) : 100U);
+#else
         if (e3 == BSP_KEY_EVENT_LONG)        temp_high += 200U;
         if (e3 == BSP_KEY_EVENT_CLICK)       temp_high += 50U;
         if (e3 == BSP_KEY_EVENT_LONG_REPEAT) temp_high += 50U;
         if (temp_high <= temp_mid)           temp_high = (uint16_t)(temp_mid + 100U);
+#endif
         BSP_UART_Printf("[temp ] mid=%u high=%u  raw=%u\r\n",
                         temp_mid, temp_high, BSP_ADC_GetRaw(BSP_ADC_CH_TEMP));
         return;
@@ -463,12 +491,21 @@ static void handle_keys(void)
         else         { lamp_sel = 0U; lamp_on = 1U; }
         BSP_UART_Printf("[lamp] -> LED%d\r\n", lamp_sel + 1);
     }
-    if (e2 == BSP_KEY_EVENT_LONG)                  /* 全选 */
+    if (e2 == BSP_KEY_EVENT_LONG)                  /* 全亮 ⇄ 全灭（同一个键切换） */
     {
         lamp_flow = 0U;
-        lamp_all  = 1U;
-        lamp_on   = 1U;
-        BSP_UART_Printf("[lamp] ALL\r\n");
+        if (lamp_all)
+        {
+            lamp_all = 0U;
+            lamp_on  = 0U;
+            BSP_UART_Printf("[lamp] ALL OFF\r\n");
+        }
+        else
+        {
+            lamp_all = 1U;
+            lamp_on  = 1U;
+            BSP_UART_Printf("[lamp] ALL ON\r\n");
+        }
     }
     if (e2 == BSP_KEY_EVENT_DOUBLE)                /* 流水灯开关 */
     {
@@ -480,19 +517,21 @@ static void handle_keys(void)
         lamp_breath = (uint8_t)(!lamp_breath);
         BSP_UART_Printf("[lamp] breath %s\r\n", lamp_breath ? "ON" : "OFF");
     }
-    if (e3 == BSP_KEY_EVENT_LONG)                  /* 全灭 */
+    if (e3 == BSP_KEY_EVENT_LONG)                  /* K3 长按 = 进时间设置（自动跳到时钟页） */
     {
-        lamp_all  = 0U;
-        lamp_on   = 0U;
-        lamp_flow = 0U;
-        BSP_UART_Printf("[lamp] OFF\r\n");
-    }
-    if ((e3 == BSP_KEY_EVENT_DOUBLE) && (screen == SCR_CLOCK))   /* 进时间设置 */
-    {
+        screen    = SCR_CLOCK;
         time_set  = 1U;
         time_unit = TU_HOUR;
         rtc_load();
-        BSP_UART_Printf("[time] enter set\r\n");
+        if (oled_ok) OLED_Clear(&g_oled);
+        BSP_UART_Printf("[time] enter set (K3 hold)\r\n");
+    }
+    if (e3 == BSP_KEY_EVENT_DOUBLE)                /* 阈值恢复默认 */
+    {
+        light_thr = CFG_LIGHT_THR_DEFAULT;
+        temp_mid  = CFG_TEMP_MID;
+        temp_high = CFG_TEMP_HIGH;
+        BSP_UART_Printf("[thr ] reset to %u%% / %u / %u\r\n", light_thr, temp_mid, temp_high);
     }
 }
 

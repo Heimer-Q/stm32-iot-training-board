@@ -62,9 +62,14 @@ static const char *temp_level_str(void)
 {
     uint16_t raw = BSP_ADC_GetRaw(BSP_ADC_CH_TEMP);
 
-    if (raw < CFG_TEMP_LOW_MAX)  return "LOW";
-    if (raw < CFG_TEMP_MID_MAX)  return "MID";
-    return "HIGH";
+#if CFG_TEMP_INVERT
+    if (raw <= CFG_TEMP_HIGH) return "HIGH";   /* 越热读数越小 */
+    if (raw <= CFG_TEMP_MID)  return "MID";
+#else
+    if (raw >= CFG_TEMP_HIGH) return "HIGH";
+    if (raw >= CFG_TEMP_MID)  return "MID";
+#endif
+    return "LOW";
 }
 
 static const char *lamp_mode_str(void)

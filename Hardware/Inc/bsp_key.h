@@ -26,7 +26,7 @@
 #define BSP_KEY_DEBOUNCE_TICKS  2U    /* 按下确认：连续 2 拍为按下（20ms） */
 #define BSP_KEY_LONG_TICKS      40U   /* 400ms 算长按 */
 #define BSP_KEY_CLICK_MAX_TICKS 70U   /* 松手时按下时间 < 700ms 才算短按 */
-#define BSP_KEY_DOUBLE_TICKS    15U   /* 松手后 150ms 内再按 = 双击 */
+#define BSP_KEY_DOUBLE_TICKS    25U   /* 松手后 250ms 内再按 = 双击（150ms 太苛刻，人手跟不上） */
 #define BSP_KEY_REPEAT_TICKS    20U   /* 长按之后每 200ms 触发一次（调时间用） */
 
 #define BSP_KEY_TICK_MS         10U   /* 状态机节拍 */
