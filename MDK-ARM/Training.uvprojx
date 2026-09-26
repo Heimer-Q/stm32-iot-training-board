@@ -606,6 +606,11 @@
               <FileType>1</FileType>
               <FilePath>..\App\Src\app_selftest.c</FilePath>
             </File>
+            <File>
+              <FileName>app_demo.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\Src\app_demo.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

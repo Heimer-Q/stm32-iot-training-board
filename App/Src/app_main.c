@@ -2,6 +2,7 @@
 #include "app_config.h"
 #include "app_selftest.h"
 #include "app_light.h"
+#include "app_demo.h"
 
 void APP_Main_Init(void)
 {
@@ -10,7 +11,7 @@ void APP_Main_Init(void)
 #elif (DEMO_ID == DEMO_LIGHT)
     APP_Light_Init();
 #elif (DEMO_ID == DEMO_FINAL)
-    APP_SelfTest_Init();          /* 结课整合：后续把时钟、光控、上报一并挂进来 */
+    APP_Demo_Init();              /* 全功能：3 画面 × 3 模式 + 时间设置 + 锁屏 */
 #else
     BSP_LED_Init();
     for (uint8_t i = 0; i < LED_NUM; i++) BSP_LED_SetPercent(i, 100U);   /* 未知编号：三个灯全亮 */
@@ -24,6 +25,6 @@ void APP_Main_Process(void)
 #elif (DEMO_ID == DEMO_LIGHT)
     APP_Light_Process();
 #elif (DEMO_ID == DEMO_FINAL)
-    APP_SelfTest_Process();
+    APP_Demo_Process();
 #endif
 }
