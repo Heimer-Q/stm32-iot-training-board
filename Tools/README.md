@@ -21,7 +21,7 @@ python Tools/make_font.py --ascii
 ## 2. 学生用：把自己的班级 / 姓名 / 要显示的整句话做成字库
 
 ```powershell
-python Tools/make_font.py "物联本251周志勤|温度 %.1fC|光照 %d%%|时间 %02d:%02d"
+python Tools/make_font.py "哲学本263陈桂林|温度 %.1fC|光照 %d%%|时间 %02d:%02d"
 ```
 
 - **多句话用 `|` 分开**，每句生成一个宏：`USER_TEXT_1`、`USER_TEXT_2` …

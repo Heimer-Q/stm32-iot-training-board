@@ -7,7 +7,7 @@
    → Hardware/Inc/oled_font_ascii8x16.h  ，字体对象 font_ascii8x16
 
 2) 学生用：把自己的班级 / 姓名 / 要显示的整句话做成字库
-       python Tools/make_font.py "物联本251周志勤"
+       python Tools/make_font.py "哲学本263陈桂林"
        python Tools/make_font.py "温度 %.1fC|光照 %d%%|时间 %02d:%02d"
      （多句话用 | 分开，每句会生成一个宏 USER_TEXT_1 / USER_TEXT_2 …）
    → Hardware/Inc/oled_font_user.h       ，字体对象 font_user
@@ -255,7 +255,7 @@ def main():
         texts = None
     else:
         if not args.text:
-            ap.error("要么加 --ascii 生成英文，要么写一段文字（例如：python Tools/make_font.py 周志勤）")
+            ap.error("要么加 --ascii 生成英文，要么写一段文字（例如：python Tools/make_font.py 陈桂林）")
         texts = [t for t in args.text.split("|") if t != ""]
         chars = unique_chars("".join(texts) + AUTO_SYMBOLS)   # 自动补常用数字与符号
         cell_w, cell_h = 16, 16
