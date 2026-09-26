@@ -11,10 +11,10 @@
     {
       "name": "anim1",
       "source": "Tools/gif_src/anim1.txt",
-      "size": [128, 64],
-      "step": 2,
+      "size": [64, 64],
+      "step": 3,
       "delay": 70,
-      "comment": "打篮球动图：原 22 帧 498x348，抽帧到 11 帧，铺满 128x64"
+      "comment": "蜡笔小新动图：原 59 帧 121x121，抽帧到 20 帧，64x64 居中"
     }
   ]
 }
