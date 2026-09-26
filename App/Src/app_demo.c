@@ -17,6 +17,10 @@
   * 时间设置里：
   *   K1 短按 = 六个单位循环（年→月→日→时→分→秒→年），K1 长按 = 退出；
   *   K2/K3 = 当前单位 −1/+1（长按连调），**每改一次立即写回 RTC**。
+  *
+  * 光控 / 热控都是"三档渐进"（同一个套路）：
+  *   光控：越暗亮的颗数越多（1→2→3 颗，呼吸状态）
+  *   热控：越热亮的颗数越多（1→2→3 颗，闪烁状态）
   ******************************************************************************
   */
 
@@ -113,18 +117,33 @@ static const char *unit_name(void)
     return n[time_unit % TU_NUM];
 }
 
-static const char *temp_level_str(void)
+/* 温度占满量程的百分比（0—100） */
+static uint32_t temp_percent(void)
 {
-    uint16_t raw = BSP_ADC_GetRaw(BSP_ADC_CH_TEMP);
+    return (uint32_t)BSP_ADC_GetRaw(BSP_ADC_CH_TEMP) * 100U / 4095U;
+}
+
+/* 热控档位：把 [高温端 … 中温端] 均分三份，返回该亮几颗（0—3）
+   —— 和光控同一套逻辑，越热/越暗，亮的颗数越多 */
+static uint8_t temp_band_count(void)
+{
+    uint32_t pct  = temp_percent();
+    uint32_t hi   = temp_mid;                       /* 起点（按键可调） */
+    uint32_t lo   = temp_high;                      /* 终点（按键可调） */
+    uint32_t span = (hi > lo) ? (hi - lo) : 1U;
 
 #if CFG_TEMP_INVERT
-    if (raw <= temp_high) return "HIGH";
-    if (raw <= temp_mid)  return "MID";
+    if (pct >= hi) return 0U;                       /* 室温：不亮 */
+    if (pct >= lo + span * 2U / 3U) return 1U;      /* 有点热：1 颗闪 */
+    if (pct >= lo + span / 3U)      return 2U;      /* 比较热：2 颗闪 */
+    return 3U;                                      /* 很热：3 颗一起闪 */
 #else
-    if (raw >= temp_high) return "HIGH";
-    if (raw >= temp_mid)  return "MID";
+    if (pct <= lo) return 3U;
+    if (pct >= hi) return 0U;
+    if (pct >= hi - span / 3U)      return 1U;
+    if (pct >= hi - span * 2U / 3U) return 2U;
+    return 3U;
 #endif
-    return "LOW";
 }
 
 /* ------------------------------ 灯的输出 ------------------------------ */
@@ -165,24 +184,13 @@ static void lamp_update(void)
     }
     else if (mode == MODE_THERMAL)
     {
-        uint16_t raw   = BSP_ADC_GetRaw(BSP_ADC_CH_TEMP);
-        uint8_t  blink = blink_level(now);
+        /* 三档：越热亮的颗数越多（1 → 2 → 3 颗），都是闪烁 */
+        uint8_t n     = temp_band_count();
+        uint8_t blink = blink_level(now);
 
-#if CFG_TEMP_INVERT
-        if (raw <= temp_high)             /* 高温：三颗一起闪（越热读数越小） */
+        for (i = 0U; i < n; i++)
         {
-            for (i = 0U; i < LED_NUM; i++) duty[i] = blink;
-        }
-        else if (raw <= temp_mid)         /* 中温：单颗闪 */
-#else
-        if (raw >= temp_high)
-        {
-            for (i = 0U; i < LED_NUM; i++) duty[i] = blink;
-        }
-        else if (raw >= temp_mid)
-#endif
-        {
-            duty[lamp_sel % LED_NUM] = blink;
+            duty[i] = blink;
         }
     }
     else if (lamp_flow)                   /* 手动：流水灯 */
@@ -302,11 +310,11 @@ static void draw_clock(void)
         }
         else
         {
-            /* 温度：当前百分比 + 中温阈值 + 当前档位（LOW/MID/HIGH） */
-            line_printf(3, "TMP %3d%% M%2d %s",
-                        (unsigned)((uint32_t)BSP_ADC_GetRaw(BSP_ADC_CH_TEMP) * 100U / 4095U),
+            /* 温度：当前百分比 + 起点阈值 + 该亮几颗（0—3） */
+            line_printf(3, "TMP %3d%% M%2d N%d",
+                        (unsigned)temp_percent(),
                         (unsigned)(temp_mid * 100U / 4095U),
-                        temp_level_str());
+                        temp_band_count());
         }
     }
 }
