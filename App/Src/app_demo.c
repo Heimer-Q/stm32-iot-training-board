@@ -47,8 +47,9 @@ static WorkMode mode     = MODE_NORMAL;
 static uint8_t  locked;
 static uint8_t  time_set;
 static uint8_t  time_unit;
-static uint8_t  gif_frame;                              /* 当前动图帧号 */
-static uint16_t gif_delay_ms = OLED_GIF_DELAY_MS;       /* 每帧时长，可在图片页用按键调 */
+static uint8_t  anim_idx;                               /* 当前是第几张动图 */
+static uint8_t  gif_frame;                              /* 当前动图播到第几帧 */
+static uint16_t gif_delay_ms;                           /* 每帧时长，可在图片页用按键调 */
 static uint32_t t_gif;
 
 /* 灯 */
@@ -336,11 +337,13 @@ static void draw_clock(void)
 
 static void draw_image(void)
 {
+    const OledAnim *a = &OLED_ANIMS[anim_idx % OLED_ANIM_COUNT];
+
     /* 动图：每帧整屏重画，先清屏避免上一帧残留 */
     OLED_Clear(&g_oled);
-    OLED_SetCursor(&g_oled, (int16_t)((128 - (int16_t)OLED_GIF_W) / 2),
-                            (int16_t)((64 - (int16_t)OLED_GIF_H) / 2));
-    OLED_DrawBitmap(&g_oled, OLED_GIF_W, OLED_GIF_H, OLED_GIF[gif_frame % OLED_GIF_COUNT]);
+    OLED_SetCursor(&g_oled, (int16_t)((128 - (int16_t)a->w) / 2),
+                            (int16_t)((64 - (int16_t)a->h) / 2));
+    OLED_DrawBitmap(&g_oled, a->w, a->h, a->frames[gif_frame % a->count]);
     if (locked)
     {
         show_line(0, "** LOCKED **");
@@ -483,15 +486,35 @@ static void handle_keys(void)
         return;
     }
 
-    /* ---------- 图片页：K2 慢一点 / K3 快一点（动图播放速度） ---------- */
+    /* ---------- 图片页：短按换动图，长按调速度 ---------- */
     if (screen == SCR_IMAGE)
     {
-        if (e2 == BSP_KEY_EVENT_CLICK)                 /* 慢 */
+        if (e2 == BSP_KEY_EVENT_CLICK)                 /* 上一张动图 */
+        {
+            anim_idx = (uint8_t)((anim_idx + OLED_ANIM_COUNT - 1U) % OLED_ANIM_COUNT);
+            gif_frame = 0U;
+            gif_delay_ms = OLED_ANIMS[anim_idx].delay_ms;
+            BSP_UART_Printf("[gif ] anim %d/%d  %dx%d  %d frames\r\n",
+                            anim_idx + 1, OLED_ANIM_COUNT,
+                            OLED_ANIMS[anim_idx].w, OLED_ANIMS[anim_idx].h,
+                            OLED_ANIMS[anim_idx].count);
+        }
+        if (e3 == BSP_KEY_EVENT_CLICK)                 /* 下一张动图 */
+        {
+            anim_idx = (uint8_t)((anim_idx + 1U) % OLED_ANIM_COUNT);
+            gif_frame = 0U;
+            gif_delay_ms = OLED_ANIMS[anim_idx].delay_ms;
+            BSP_UART_Printf("[gif ] anim %d/%d  %dx%d  %d frames\r\n",
+                            anim_idx + 1, OLED_ANIM_COUNT,
+                            OLED_ANIMS[anim_idx].w, OLED_ANIMS[anim_idx].h,
+                            OLED_ANIMS[anim_idx].count);
+        }
+        if (e2 == BSP_KEY_EVENT_LONG)                  /* 慢 */
         {
             gif_delay_ms = (uint16_t)((gif_delay_ms < 400U) ? (gif_delay_ms + 20U) : 400U);
             BSP_UART_Printf("[gif ] delay %u ms\r\n", gif_delay_ms);
         }
-        if (e3 == BSP_KEY_EVENT_CLICK)                 /* 快 */
+        if (e3 == BSP_KEY_EVENT_LONG)                  /* 快 */
         {
             gif_delay_ms = (uint16_t)((gif_delay_ms > 30U) ? (gif_delay_ms - 20U) : 30U);
             BSP_UART_Printf("[gif ] delay %u ms\r\n", gif_delay_ms);
@@ -611,9 +634,13 @@ void APP_Demo_Init(void)
     rtc_load();
     BSP_UART_Printf("[rtc ] %02d:%02d:%02d 20%02d-%02d-%02d\r\n",
                     t_hour, t_min, t_sec, t_year, t_month, t_day);
-    BSP_UART_Printf("[gif ] %d frames %dx%d, %d bytes, %u ms/frame\r\n",
-                    OLED_GIF_COUNT, OLED_GIF_W, OLED_GIF_H,
-                    OLED_GIF_W / 8 * OLED_GIF_H * OLED_GIF_COUNT, gif_delay_ms);
+    for (uint8_t i = 0U; i < OLED_ANIM_COUNT; i++)
+    {
+        BSP_UART_Printf("[gif ] anim%d: %dx%d, %d frames, %u ms, %d bytes\r\n",
+                        i, OLED_ANIMS[i].w, OLED_ANIMS[i].h, OLED_ANIMS[i].count,
+                        OLED_ANIMS[i].delay_ms,
+                        ((OLED_ANIMS[i].w + 7) / 8) * OLED_ANIMS[i].h * OLED_ANIMS[i].count);
+    }
     BSP_UART_Printf("[tips] K1 screen/hold=lock/double=mode | K2 sel/all/flow | K3 breath/off/set-time\r\n");
 
     lamp_sel = 0U; lamp_all = 0U; lamp_on = 0U; lamp_breath = 0U; lamp_flow = 0U;
@@ -623,6 +650,8 @@ void APP_Demo_Init(void)
     t_adc = t_draw = t_beat = boot_ms;
     t_gif = boot_ms;
     gif_frame = 0U;
+    anim_idx = 0U;
+    gif_delay_ms = OLED_ANIMS[0].delay_ms;
 
     if (oled_ok)
     {
@@ -650,8 +679,9 @@ void APP_Demo_Process(void)
         /* 动图：按 gif_delay_ms 逐帧推进（图片页专用节拍） */
         if (now - t_gif >= gif_delay_ms)
         {
+            const OledAnim *a = &OLED_ANIMS[anim_idx % OLED_ANIM_COUNT];
             t_gif = now;
-            gif_frame = (uint8_t)((gif_frame + 1U) % OLED_GIF_COUNT);
+            gif_frame = (uint8_t)((gif_frame + 1U) % a->count);
             screen_draw();
         }
     }

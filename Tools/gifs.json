@@ -1,0 +1,20 @@
+{
+  "animations": [
+    {
+      "name": "anim0",
+      "source": "Tools/gif_src/anim0.txt",
+      "size": [64, 64],
+      "step": 2,
+      "delay": 70,
+      "comment": "协会取模动图：原 42 帧 200x200，抽帧到 21 帧，64x64 居中"
+    },
+    {
+      "name": "anim1",
+      "source": "Tools/gif_src/anim1.txt",
+      "size": [128, 64],
+      "step": 2,
+      "delay": 70,
+      "comment": "打篮球动图：原 22 帧 498x348，抽帧到 11 帧，铺满 128x64"
+    }
+  ]
+}
