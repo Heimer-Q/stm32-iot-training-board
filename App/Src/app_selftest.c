@@ -24,8 +24,7 @@
 #define ST_LINE_TITLE   0
 #define ST_LINE_OLED    1
 #define ST_LINE_KEY     2
-#define ST_LINE_TIP     3
-#define ST_LINE_STEP    5          /* 行距 = 字体高度，具体值在 Init 里按字体算 */
+#define ST_LINE_USER    3          /* 学生自己生成的中文班级/姓名 */
 
 static uint8_t  oled_ok;
 static uint16_t line_h;
@@ -34,7 +33,8 @@ static uint32_t last_refresh_tick;
 
 static void show_line(uint8_t row, const char *text)
 {
-    OLED_SetCursor(&g_oled, 0, (int16_t)(row * line_h));
+    /* 注意：OLED 光标的 Y 是"基线"而不是行的上边缘，所以第 n 行的基线 = (n+1) × 行高 */
+    OLED_SetCursor(&g_oled, 0, (int16_t)((row + 1U) * line_h));
     OLED_DrawString(&g_oled, text);
 }
 
@@ -72,10 +72,11 @@ void APP_SelfTest_Init(void)
     line_h = OLED_GetFontHeight(&g_oled);
     if (line_h == 0U) line_h = 8U;
 
-    show_line(ST_LINE_TITLE, "SELFTEST  v0.1");
+    show_line(ST_LINE_TITLE, "SELFTEST  v0.2");
     show_line(ST_LINE_OLED,  "OLED : OK");
     show_line(ST_LINE_KEY,   "KEY  : 0 0 0");
-    show_line(ST_LINE_TIP,   "K1-Y K2-M K3-N");
+    /* 第四行：学生自己生成的班级/姓名（字模来自 Tools/make_font.py） */
+    BSP_OLED_ShowUserText(0, (int16_t)((ST_LINE_USER + 1U) * line_h));
     BSP_OLED_Refresh();
 
     last_scan_tick = HAL_GetTick();

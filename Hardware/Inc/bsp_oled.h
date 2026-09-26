@@ -26,4 +26,8 @@ int  BSP_OLED_LastError(void);
 /* 把显存推给屏幕；改完画面后调一次 */
 void BSP_OLED_Refresh(void);
 
+/* 显示"学生自己生成的"班级/姓名：字模来自 Hardware/Inc/oled_font_user.h（Tools/make_font.py 生成）
+   @参数：x - 起始列；baseline_y - 这一行的基线 Y（16 像素一行时，第 n 行填 n*16+16） */
+void BSP_OLED_ShowUserText(int16_t x, int16_t baseline_y);
+
 #endif /* __BSP_OLED_H */

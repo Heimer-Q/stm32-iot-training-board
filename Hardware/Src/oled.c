@@ -14,6 +14,7 @@
 #include <stdarg.h>
 #include "oled.h"
 #include "oled_default_font.h"
+#include "oled_font_ascii8x16.h"   /* 本工程默认字体（8x16 英文），由 Tools/make_font.py 生成 */
 #include <math.h>
 
 // 定义屏幕尺寸
@@ -125,7 +126,9 @@ int OLED_Init(OLED_TypeDef *OLED, OLED_InitTypeDef *OLED_InitStruct)
 	OLED->TextRegionWidth = 0;
 	OLED->TextRegionHeight = 0;
 	
-	OLED->Font = &default_font; // 使用默认字体，8*8点阵字体
+	// 原版这里是 &default_font（5x8，教室投影太糊）。改成我们的 8x16 英文字库，
+	// 同时让 5x8 那份字库不再被引用，链接器会把它丢掉，省约 5.9KB Flash。
+	OLED->Font = &font_ascii8x16;
 	
 	return 0;
 }

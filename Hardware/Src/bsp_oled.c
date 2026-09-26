@@ -1,5 +1,10 @@
 #include "bsp_oled.h"
 
+/* 字体：8x16 英文由 oled.c 在初始化时设为默认；这里只带学生自己生成的那份。
+   注意：字库头文件里是"实体定义"（不是 static），**同一个字库只能被一个 .c 包含**，
+        否则链接会报 L6200E: Symbol ... multiply defined。 */
+#include "oled_font_user.h"
+
 /* 本板 OLED 挂在硬件 I2C1 上（PB6/PB7），地址 7 位 0x3C
    —— 铁头山羊的驱动用 8 位写法 0x78（0x3C<<1），HAL 也收 8 位写法，不用换算 */
 #define BSP_OLED_I2C      (&hi2c1)
@@ -35,7 +40,6 @@ int BSP_OLED_Init(void)
         return ret;
     }
 
-    OLED_SetFont(&g_oled, &default_font);
     OLED_Clear(&g_oled);
 
     ret = OLED_SendBuffer(&g_oled);
@@ -57,4 +61,14 @@ int BSP_OLED_LastError(void)
 void BSP_OLED_Refresh(void)
 {
     (void)OLED_SendBuffer(&g_oled);
+}
+
+void BSP_OLED_ShowUserText(int16_t x, int16_t baseline_y)
+{
+    const Font_TypeDef *keep = g_oled.Font;
+
+    OLED_SetFont(&g_oled, &font_user);
+    OLED_SetCursor(&g_oled, x, baseline_y);
+    OLED_DrawString(&g_oled, USER_FONT_TEXT);
+    OLED_SetFont(&g_oled, keep);
 }
