@@ -40,6 +40,14 @@ int BSP_OLED_Init(void)
         return ret;
     }
 
+    /* 画笔/画刷（这里容易搞反，记牢）：
+       - PenColor   = WHITE(点亮)：负责画字的"笔画"；
+       - Brush      = BLACK(熄灭)：负责字格背景，也就是把上一次的字擦掉；
+       - Brush 用 WHITE 会把整个字格点亮 → 满屏白块（花屏）；
+       - Brush 用 TRANSPARENT（驱动默认）不擦旧像素 → 数字叠在一起。 */
+    OLED_SetPen(&g_oled, PEN_COLOR_WHITE, 1);
+    OLED_SetBrush(&g_oled, BRUSH_BLACK);
+
     OLED_Clear(&g_oled);
 
     ret = OLED_SendBuffer(&g_oled);
