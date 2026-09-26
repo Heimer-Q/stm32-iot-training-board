@@ -50,8 +50,9 @@ static uint8_t lamp_sel, lamp_all, lamp_on, lamp_breath, lamp_flow;
 
 /* 阈值（按键可调） */
 static uint8_t  light_thr = CFG_LIGHT_THR_DEFAULT;   /* 光控：低于这个光照百分比开始点灯 */
-static uint16_t temp_mid  = CFG_TEMP_MID;    /* 热控中温阈值（原始码，越大越冷） */
-static uint16_t temp_high = CFG_TEMP_HIGH;   /* 热控高温阈值（比中温更小） */
+/* 热控阈值：按满量程百分比换算成原始码（4095 满量程） */
+static uint16_t temp_mid  = (uint16_t)(4095UL * CFG_TEMP_MID_PCT  / 100UL);   /* 45% ≈ 1842 */
+static uint16_t temp_high = (uint16_t)(4095UL * CFG_TEMP_HIGH_PCT / 100UL);   /* 30% ≈ 1228 */
 
 /* 时间影子（改完立即写 RTC） */
 static uint8_t t_year, t_month, t_day, t_hour, t_min, t_sec;
@@ -529,8 +530,8 @@ static void handle_keys(void)
     if (e3 == BSP_KEY_EVENT_DOUBLE)                /* 阈值恢复默认 */
     {
         light_thr = CFG_LIGHT_THR_DEFAULT;
-        temp_mid  = CFG_TEMP_MID;
-        temp_high = CFG_TEMP_HIGH;
+        temp_mid  = (uint16_t)(4095UL * CFG_TEMP_MID_PCT  / 100UL);
+        temp_high = (uint16_t)(4095UL * CFG_TEMP_HIGH_PCT / 100UL);
         BSP_UART_Printf("[thr ] reset to %u%% / %u / %u\r\n", light_thr, temp_mid, temp_high);
     }
 }

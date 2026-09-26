@@ -31,17 +31,20 @@
 
 /* ====================== 温度分档（热敏原始码 → 高/中/低） ======================
  * 实测（2026-09-26）：NTC 越热阻值越小 → 分压读数越小，所以要反转判断。
- *   rawT ≤ TEMP_HIGH → 高温；rawT ≤ TEMP_MID → 中温；否则低温（室温约 2015） */
+ * 档位按"ADC 满量程 4095 的百分比"定义，中温/高温相差 CFG_TEMP_STEP_PCT = 15%：
+ *   中温阈值 = 45% × 4095 ≈ 1842；高温阈值 = 30% × 4095 ≈ 1228
+ *   rawT ≤ 高温阈值 → HIGH；rawT ≤ 中温阈值 → MID；否则 LOW（室温约 2015） */
 #define CFG_TEMP_INVERT        1U      /* 1 = 越热读数越小；0 = 越热读数越大 */
-#define CFG_TEMP_MID           1900U   /* 中温阈值（原始码） */
-#define CFG_TEMP_HIGH          1600U   /* 高温阈值（比中温更"热"，所以数值更小） */
+#define CFG_TEMP_STEP_PCT      15U     /* 中温与高温之间差 15% */
+#define CFG_TEMP_MID_PCT       45U     /* 中温阈值：满量程的 45% */
+#define CFG_TEMP_HIGH_PCT      (CFG_TEMP_MID_PCT - CFG_TEMP_STEP_PCT)   /* 30% */
 
 /* ====================== 光控灯（K1 长按进入）的映射区间 ======================
  * 光照 ≤ DARK_MIN 时灯最亮，≥ BRIGHT_MAX 时灯最暗（越暗越亮） */
 /* 光控默认阈值：实测室内灯下约 76%、手遮住约 27%，所以默认 60%
    （低于 60% 亮 1 颗；再低 20% 亮 2 颗；再低 40% 亮 3 颗，全部呼吸） */
 #define CFG_LIGHT_THR_DEFAULT    60U
-#define CFG_LIGHT_THR_STEP       20U
+#define CFG_LIGHT_THR_STEP       15U   /* 光控档位：每低 15% 多亮一颗（会长 2026-09-26 定） */
 
 /* 串口调试波特率（USART1，接板上 DEBUG 排针） */
 #define CFG_DEBUG_BAUD         115200U

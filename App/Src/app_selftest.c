@@ -60,14 +60,15 @@ static void show_line(uint8_t row, const char *text)
 
 static const char *temp_level_str(void)
 {
-    uint16_t raw = BSP_ADC_GetRaw(BSP_ADC_CH_TEMP);
+    /* 按满量程百分比判断（和 app_demo 同一套口径） */
+    uint32_t pct = (uint32_t)BSP_ADC_GetRaw(BSP_ADC_CH_TEMP) * 100U / 4095U;
 
 #if CFG_TEMP_INVERT
-    if (raw <= CFG_TEMP_HIGH) return "HIGH";   /* 越热读数越小 */
-    if (raw <= CFG_TEMP_MID)  return "MID";
+    if (pct <= CFG_TEMP_HIGH_PCT) return "HIGH";   /* 越热读数越小 */
+    if (pct <= CFG_TEMP_MID_PCT)  return "MID";
 #else
-    if (raw >= CFG_TEMP_HIGH) return "HIGH";
-    if (raw >= CFG_TEMP_MID)  return "MID";
+    if (pct >= CFG_TEMP_HIGH_PCT) return "HIGH";
+    if (pct >= CFG_TEMP_MID_PCT)  return "MID";
 #endif
     return "LOW";
 }
@@ -109,20 +110,13 @@ static void lamp_apply(void)
 
     if (lamp_adc)
     {
+        /* 光控：光照低于阈值就点亮，越低越亮（与 app_demo 同一套口径） */
         uint32_t p = BSP_ADC_LightPercent();
 
-        if (p <= CFG_LAMP_ADC_DARK_MIN)
+        if (p < CFG_LIGHT_THR_DEFAULT)
         {
-            duty = 100U;
-        }
-        else if (p >= CFG_LAMP_ADC_BRIGHT_MAX)
-        {
-            duty = 0U;
-        }
-        else
-        {
-            duty = 100U - (p - CFG_LAMP_ADC_DARK_MIN) * 100U /
-                           (CFG_LAMP_ADC_BRIGHT_MAX - CFG_LAMP_ADC_DARK_MIN);
+            uint32_t d = 100U - (p * 100U / CFG_LIGHT_THR_DEFAULT);
+            duty = (d > 100U) ? 100U : d;
         }
     }
 
