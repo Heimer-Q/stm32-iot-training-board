@@ -582,6 +582,11 @@
               <FilePath>..\Hardware\Src\bsp_rtc.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_beep.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Hardware\Src\bsp_beep.c</FilePath>
+            </File>
+            <File>
               <FileName>oled.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Hardware\Src\oled.c</FilePath>
@@ -591,6 +596,11 @@
         <Group>
           <GroupName>App</GroupName>
           <Files>
+            <File>
+              <FileName>app_beep.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\Src\app_beep.c</FilePath>
+            </File>
             <File>
               <FileName>app_light.c</FileName>
               <FileType>1</FileType>
