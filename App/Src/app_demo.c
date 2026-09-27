@@ -32,6 +32,7 @@
 #include "bsp_uart.h"
 #include "bsp_adc.h"
 #include "bsp_rtc.h"
+#include "bsp_beep.h"          /* 板载蜂鸣器（PB1 / TIM3_CH4）：开机提示音 + 按键音 */
 #include "oled_gif.h"          /* 动图（Tools/make_gif.py 生成） */
 
 #include <stdarg.h>
@@ -500,6 +501,7 @@ static void handle_keys(void)
             screen = (ScreenId)((screen + 1U) % (uint8_t)SCR_NUM);
             if (oled_ok) OLED_Clear(&g_oled);
             BSP_UART_Printf("[ui  ] screen -> %d\r\n", (int)screen);
+            BSP_BEEP_PlayTone(1047U, 40U);      /* 切画面：极短"嘀"一下 */
         }
         break;
     case BSP_KEY_EVENT_LONG:
@@ -519,6 +521,7 @@ static void handle_keys(void)
         {
             mode = (WorkMode)((mode + 1U) % (uint8_t)MODE_NUM);
             BSP_UART_Printf("[mode] -> %s\r\n", mode_name());
+            BSP_BEEP_PlayTone(1319U, 60U);      /* 切模式：两声不同音高区分 */
         }
         break;
     default:
@@ -672,6 +675,7 @@ void APP_Demo_Init(void)
 
     BSP_LED_Init();
     BSP_KEY_Init();
+    BSP_BEEP_Init();
     BSP_ADC_Init();
     BSP_RTC_Init();
     BSP_LED_AllOff();
@@ -701,6 +705,8 @@ void APP_Demo_Init(void)
     boot_ms = HAL_GetTick();
     t_adc = t_draw = t_beat = boot_ms;
     t_gif = boot_ms;
+
+    BSP_BEEP_Beep(80U);        /* 上电"滴"一声：听到就说明蜂鸣器这一路通了 */
     gif_frame = 0U;
     anim_idx = 0U;
     gif_delay_ms = OLED_ANIMS[0].delay_ms;
@@ -717,6 +723,7 @@ void APP_Demo_Process(void)
 {
     uint32_t now = HAL_GetTick();
 
+    BSP_BEEP_Task();           /* 提示音到点自动停（不阻塞） */
     handle_keys();
     lamp_update();
 
