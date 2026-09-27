@@ -27,6 +27,10 @@ JLinkLog.txt
 
 # CubeMX 临时/备份
 *.mxbackup
+MXTmpFiles/
+
+# Keil 构建技能的工作目录（日志与上次构建状态）
+.embeddedskills/
 
 # 系统
 Thumbs.db
