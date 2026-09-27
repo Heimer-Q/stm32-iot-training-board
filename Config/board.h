@@ -27,6 +27,12 @@
 #define KEY3_PORT   GPIOB
 #define KEY3_PIN    GPIO_PIN_9
 
+/* 蜂鸣器：PB1 = TIM3_CH4，经 S8050 低边开关驱动（PB1 高电平 = 导通 = 响，不反相）
+   同一个 TIM3 的前三个通道给 LED，第四通道给蜂鸣器；有源/无源都插 J4 那个座 */
+#define BEEP_TIM          (&htim3)
+#define BEEP_CHANNEL      TIM_CHANNEL_4
+#define BEEP_PWM_PERIOD   1000U   /* 与 .ioc 的 Period = 1000-1 一致（ARR+1） */
+
 /* 传感器：光敏 PA0 = ADC1_IN0，热敏 PA1 = ADC1_IN1 */
 #define LIGHT_ADC_CHANNEL   ADC_CHANNEL_0
 #define TEMP_ADC_CHANNEL    ADC_CHANNEL_1
