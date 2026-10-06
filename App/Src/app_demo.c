@@ -399,11 +399,11 @@ static void draw_status(void)
                 (unsigned)temp_percent(), (unsigned)raw_to_pct(temp_mid), temp_band_count());
 }
 
-/* 信息页：前三行是学生字库里的中文（生成时用 | 分隔），第 4 行显示实时时间 */
+/* 信息页：前三行是学生字库里的中文（生成时用 | 分隔），第 4 行显示"日期 + 时间" */
 static void draw_info(void)
 {
     uint8_t h, m, s;
-    char buf[12];
+    char buf[20];
 
     /* 四行全部水平居中 */
     BSP_OLED_ShowUserLineCenter(0U, (int16_t)(1U * line_h));   /* 例如 哲学本263   */
@@ -411,9 +411,12 @@ static void draw_info(void)
 
     BSP_OLED_ShowUserLineCenter(2U, (int16_t)(3U * line_h));   /* 例如 物联网协会 */
 
-    /* 第 4 行：实时时间（RTC 时:分:秒，秒在跳；板子无纽扣电池，上电按编译时刻校一次） */
+    /* 第 4 行：日期 + 时间，格式 YYMM-DD HH:MM:SS（例 2610-06 20:34:56）
+       正好 16 个字符 = 128px 占满一行；日期用"年月-日"省掉一个分隔符，秒才留得下。
+       板子无纽扣电池：上电时若 RTC 无效，会按固件编译时刻校一次 */
     BSP_RTC_Get(&h, &m, &s);
-    (void)snprintf(buf, sizeof(buf), "%02d:%02d:%02d", h, m, s);
+    (void)snprintf(buf, sizeof(buf), "%02d%02d-%02d %02d:%02d:%02d",
+                   t_year, t_month, t_day, h, m, s);
     show_line_center(3U, buf);
 }
 
