@@ -897,6 +897,7 @@ void APP_Demo_Process(void)
     if (now - t_beat >= 2000U)
     {
         t_beat += 2000U;
+        BSP_RTC_SyncDateBkup();     /* 日期滚动同步进备份寄存器（复位后能恢复） */
         /* TN = 热控现在该亮几颗（0—3），RemoteT = 原始码；调阈值时看这两个数最直观 */
         BSP_UART_Printf("[tick] scr=%d mode=%s lgt=%d%% rawT=%d TN%d lamp=%d/%d/%d/%d ev=%d/%d/%d\r\n",
                         (int)screen, mode_name(),

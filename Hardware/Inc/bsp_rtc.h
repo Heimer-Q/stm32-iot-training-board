@@ -16,5 +16,6 @@
 void    BSP_RTC_Init(void);
 uint8_t BSP_RTC_Valid(void);
 void    BSP_RTC_Get(uint8_t *hour, uint8_t *minute, uint8_t *second);
+void    BSP_RTC_SyncDateBkup(void);
 
 #endif /* __BSP_RTC_H */

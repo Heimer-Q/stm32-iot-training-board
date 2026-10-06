@@ -52,7 +52,17 @@ void MX_RTC_Init(void)
   }
 
   /* USER CODE BEGIN Check_RTC_BKUP */
-
+  /* 培训板没有 RTC 电池：RTC 域由 VDD 供电，普通复位不会丢时间。
+     CubeMX 下面那段"设置初始时间"是无条件执行的——每次启动都会把时间
+     重置回 2026-09-22 19:00:00（"按复位就回到初始"的根因）。
+     标准做法：用备份寄存器 DR1 打"已初始化"标记——
+     有标记（0x32F2）＝备份域一直有电 → 直接跳过，时间保持；
+     没标记＝首次/掉过电 → 写入初值（App 层 BSP_RTC_Init 随后还会
+     按需用编译时刻校时），并在 RTC_Init 2 区补上标记。 */
+  if (HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR1) == 0x32F2U)
+  {
+    return;
+  }
   /* USER CODE END Check_RTC_BKUP */
 
   /** Initialize RTC and set the Time and Date
@@ -75,7 +85,8 @@ void MX_RTC_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN RTC_Init 2 */
-
+  /* 打"已初始化"标记：之后任何复位/上电都不会再重写时间（除非备份域掉电） */
+  HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR1, 0x32F2U);
   /* USER CODE END RTC_Init 2 */
 
 }
