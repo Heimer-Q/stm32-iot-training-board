@@ -47,8 +47,8 @@ enum { TU_YEAR = 0, TU_MONTH, TU_DAY, TU_HOUR, TU_MIN, TU_SEC, TU_NUM };
 
 static ScreenId screen   = SCR_INFO;
 static WorkMode mode     = MODE_NORMAL;
-static uint8_t  locked;
 static uint8_t  time_set;
+static uint8_t  k3_swallow;   /* 进时间设置那一次是按着 K3 完成的：松手前吞掉 K3 事件，避免顺手改时间 */
 static uint8_t  time_unit;
 static uint8_t  anim_idx;                               /* 当前是第几张动图 */
 static uint8_t  gif_frame;                              /* 当前动图播到第几帧 */
@@ -315,8 +315,8 @@ static void draw_clock(void)
             case TU_MIN:   line_printf(1, "%02d:[%02d]:%02d", t_hour, t_min, t_sec);        break;
             default:       line_printf(1, "%02d:%02d:[%02d]", t_hour, t_min, t_sec);        break;
         }
-        line_printf(2, "K2-%s K3+%s", unit_name(), unit_name());
-        show_line(3, "K1 next  K1 hold exit");
+        line_printf(2, "K2 UNIT K2+ K3-");
+        show_line(3, "K1 EXIT");
     }
     else
     {
@@ -332,18 +332,11 @@ static void draw_clock(void)
                     (unsigned)BSP_ADC_LightPercent(),
                     (unsigned)light_thr,
                     light_band_count());
-        if (locked)
-        {
-            show_line(3, "** LOCKED **");
-        }
-        else
-        {
-            /* 温度：当前百分比 + 起点阈值 + 该亮几颗（0—3） */
-            line_printf(3, "TMP %3d%% M%2d N%d",
-                        (unsigned)temp_percent(),
-                        (unsigned)raw_to_pct(temp_mid),
-                        temp_band_count());
-        }
+        /* 温度：当前百分比 + 起点阈值 + 该亮几颗（0—3） */
+        line_printf(3, "TMP %3d%% M%2d N%d",
+                    (unsigned)temp_percent(),
+                    (unsigned)raw_to_pct(temp_mid),
+                    temp_band_count());
     }
 }
 
@@ -356,10 +349,6 @@ static void draw_image(void)
     OLED_SetCursor(&g_oled, (int16_t)((128 - (int16_t)a->w) / 2),
                             (int16_t)((64 - (int16_t)a->h) / 2));
     OLED_DrawBitmap(&g_oled, a->w, a->h, a->frames[gif_frame % a->count]);
-    if (locked)
-    {
-        show_line(0, "** LOCKED **");
-    }
 }
 
 static void draw_status(void)
@@ -375,17 +364,10 @@ static void draw_status(void)
     {
         line_printf(0, "MODE %s", mode_name());
     }
-    if (locked)
-    {
-        show_line(1, "** LOCKED **");
-    }
-    else
-    {
-        line_printf(1, "UP %02lu:%02lu:%02lu",
-                    (unsigned long)(up / 3600U),
-                    (unsigned long)((up / 60U) % 60U),
-                    (unsigned long)(up % 60U));
-    }
+    line_printf(1, "UP %02lu:%02lu:%02lu",
+                (unsigned long)(up / 3600U),
+                (unsigned long)((up / 60U) % 60U),
+                (unsigned long)(up % 60U));
     /* 和时钟页同一套格式：值% 阈值 该亮几颗 */
     line_printf(2, "LGT %3d%% T%2d N%d",
                 BSP_ADC_LightPercent(), (unsigned)light_thr, light_band_count());
@@ -403,19 +385,12 @@ static void draw_info(void)
     BSP_OLED_ShowUserLineCenter(0U, (int16_t)(1U * line_h));   /* 例如 哲学本263   */
     BSP_OLED_ShowUserLineCenter(1U, (int16_t)(2U * line_h));   /* 例如 陈桂林      */
 
-    if (locked)
-    {
-        show_line_center(3U, "** LOCKED **");
-    }
-    else
-    {
-        BSP_OLED_ShowUserLineCenter(2U, (int16_t)(3U * line_h));   /* 例如 物联网协会 */
+    BSP_OLED_ShowUserLineCenter(2U, (int16_t)(3U * line_h));   /* 例如 物联网协会 */
 
-        /* 第 4 行：实时时间（RTC 时:分:秒，秒在跳；板子无纽扣电池，上电按编译时刻校一次） */
-        BSP_RTC_Get(&h, &m, &s);
-        (void)snprintf(buf, sizeof(buf), "%02d:%02d:%02d", h, m, s);
-        show_line_center(3U, buf);
-    }
+    /* 第 4 行：实时时间（RTC 时:分:秒，秒在跳；板子无纽扣电池，上电按编译时刻校一次） */
+    BSP_RTC_Get(&h, &m, &s);
+    (void)snprintf(buf, sizeof(buf), "%02d:%02d:%02d", h, m, s);
+    show_line_center(3U, buf);
 }
 
 static void screen_draw(void)
@@ -460,72 +435,57 @@ static void handle_keys(void)
     e3 = BSP_KEY_GetEvent(BSP_KEY_3);
     count_event(e1); count_event(e2); count_event(e3);
 
-    /* ---------- 锁屏：只认 K1 长按 ---------- */
-    if (locked)
+    /* ---------- 进设置那一次是按着 K3 完成的：松手前吞掉 K3 的事件 ---------- */
+    if (k3_swallow)
     {
-        if (e1 == BSP_KEY_EVENT_LONG)
+        if (BSP_KEY_IsPressed(BSP_KEY_3) == 0U)
         {
-            locked = 0U;
-            BSP_UART_Printf("[ui  ] unlock\r\n");
+            k3_swallow = 0U;
         }
-        return;
+        else
+        {
+            e3 = BSP_KEY_EVENT_NONE;
+        }
     }
 
-    /* ---------- K1 ---------- */
+    /* ---------- K1：单击永远切页（时间设置里＝保存并退出）；长按＝切模式 ---------- */
     switch (e1)
     {
     case BSP_KEY_EVENT_CLICK:
         if (time_set)
         {
-            /* 六个单位循环切换（年→月→日→时→分→秒→年…）；退出只认 K1 长按 */
-            time_unit = (uint8_t)((time_unit + 1U) % TU_NUM);
-            BSP_UART_Printf("[time] unit -> %s\r\n", unit_name());
+            time_set = 0U;                      /* K1 一动就退出设置 */
+            BSP_UART_Printf("[time] exit set (K1 click)\r\n");
         }
-        else
-        {
-            screen = (ScreenId)((screen + 1U) % (uint8_t)SCR_NUM);
-            if (oled_ok) OLED_Clear(&g_oled);
-            BSP_UART_Printf("[ui  ] screen -> %d\r\n", (int)screen);
-            BSP_BEEP_PlayTone(1047U, 40U);      /* 切画面：极短"嘀"一下 */
-        }
+        screen = (ScreenId)((screen + 1U) % (uint8_t)SCR_NUM);
+        if (oled_ok) OLED_Clear(&g_oled);
+        BSP_UART_Printf("[ui  ] screen -> %d\r\n", (int)screen);
         break;
     case BSP_KEY_EVENT_LONG:
         if (time_set)
         {
-            time_set = 0U;
-            BSP_UART_Printf("[time] exit set (hold)\r\n");
+            time_set = 0U;                      /* K1 一动就退出设置 */
+            BSP_UART_Printf("[time] exit set (K1 hold)\r\n");
         }
-        else
-        {
-            locked = 1U;
-            BSP_UART_Printf("[ui  ] LOCK\r\n");
-        }
+        mode = (WorkMode)((mode + 1U) % (uint8_t)MODE_NUM);
+        BSP_UART_Printf("[mode] -> %s\r\n", mode_name());
         break;
-    case BSP_KEY_EVENT_DOUBLE:
-        if (!time_set)
-        {
-            mode = (WorkMode)((mode + 1U) % (uint8_t)MODE_NUM);
-            BSP_UART_Printf("[mode] -> %s\r\n", mode_name());
-            BSP_BEEP_PlayTone(1319U, 60U);      /* 切模式：两声不同音高区分 */
-        }
-        break;
-    default:
+    default:                                    /* 双击暂时不用 */
         break;
     }
 
-    /* ---------- 时间设置：K2/K3 加减（长按连调） ---------- */
+    /* ---------- 时间设置：K2 单击＝换单位；K2/K3 长按＝±1（连调） ---------- */
     if (time_set)
     {
-        if ((e2 == BSP_KEY_EVENT_CLICK) || (e2 == BSP_KEY_EVENT_LONG_REPEAT)) time_step(-1);
-        if ((e3 == BSP_KEY_EVENT_CLICK) || (e3 == BSP_KEY_EVENT_LONG_REPEAT)) time_step(+1);
-        if (e3 == BSP_KEY_EVENT_LONG)              /* K3 长按 = 退出时间设置 */
+        if (e2 == BSP_KEY_EVENT_CLICK)
         {
-            time_set = 0U;
-            BSP_UART_Printf("[time] exit set (K3 hold)\r\n");
+            time_unit = (uint8_t)((time_unit + 1U) % TU_NUM);
+            BSP_UART_Printf("[time] unit -> %s\r\n", unit_name());
         }
+        if ((e2 == BSP_KEY_EVENT_LONG) || (e2 == BSP_KEY_EVENT_LONG_REPEAT)) time_step(-1);
+        if ((e3 == BSP_KEY_EVENT_LONG) || (e3 == BSP_KEY_EVENT_LONG_REPEAT)) time_step(+1);
         return;
     }
-
     /* ---------- 图片页：短按换动图，长按调速度 ---------- */
     if (screen == SCR_IMAGE)
     {
@@ -634,9 +594,10 @@ static void handle_keys(void)
     }
     if (e3 == BSP_KEY_EVENT_LONG)                  /* K3 长按 = 进时间设置（自动跳到时钟页） */
     {
-        screen    = SCR_CLOCK;
-        time_set  = 1U;
-        time_unit = TU_HOUR;
+        screen     = SCR_CLOCK;
+        time_set   = 1U;
+        time_unit  = TU_HOUR;
+        k3_swallow = 1U;                 /* 松手前吞掉 K3 的后续事件 */
         rtc_load();
         if (oled_ok) OLED_Clear(&g_oled);
         BSP_UART_Printf("[time] enter set (K3 hold)\r\n");
@@ -685,7 +646,7 @@ void APP_Demo_Init(void)
     BSP_UART_Printf("[tips] K1 screen/hold=lock/double=mode | K2 sel/all/flow | K3 breath/off/set-time\r\n");
 
     lamp_sel = 0U; lamp_all = 0U; lamp_on = 0U; lamp_breath = 0U; lamp_flow = 0U;
-    screen = SCR_INFO; mode = MODE_NORMAL; locked = 0U; time_set = 0U;
+    screen = SCR_INFO; mode = MODE_NORMAL; time_set = 0U; k3_swallow = 0U;
 
     boot_ms = HAL_GetTick();
     t_adc = t_draw = t_beat = boot_ms;
@@ -739,8 +700,8 @@ void APP_Demo_Process(void)
     {
         t_beat += 2000U;
         /* TN = 热控现在该亮几颗（0—3），RemoteT = 原始码；调阈值时看这两个数最直观 */
-        BSP_UART_Printf("[tick] scr=%d mode=%s lock=%d lgt=%d%% rawT=%d TN%d lamp=%d/%d/%d/%d ev=%d/%d/%d\r\n",
-                        (int)screen, mode_name(), locked,
+        BSP_UART_Printf("[tick] scr=%d mode=%s lgt=%d%% rawT=%d TN%d lamp=%d/%d/%d/%d ev=%d/%d/%d\r\n",
+                        (int)screen, mode_name(),
                         BSP_ADC_LightPercent(), BSP_ADC_GetRaw(BSP_ADC_CH_TEMP), temp_band_count(),
                         lamp_on, lamp_all, lamp_breath, lamp_flow,
                         ev_click, ev_long, ev_dbl);
