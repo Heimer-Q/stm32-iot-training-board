@@ -12,15 +12,15 @@
 #include "bsp_uart.h"      /* 串口报曲名/进度，方便验证 */
 
 
-/* 小星星（Twinkle Twinkle，法国民谣，公有领域） —— 默认 300 ms/拍，42 个音符 */
+/* 小星星（Twinkle Twinkle，法国民谣，公有领域） —— 默认 500 ms/拍，42 个音符 */
 static const Note s_twinkle[] = {
-    { 523, 300}, { 523, 300}, { 784, 300}, { 784, 300}, { 880, 300}, { 880, 300},
-    { 784, 600}, { 698, 300}, { 698, 300}, { 659, 300}, { 659, 300}, { 587, 300},
-    { 587, 300}, { 523, 600}, { 784, 300}, { 784, 300}, { 698, 300}, { 698, 300},
-    { 659, 300}, { 659, 300}, { 587, 600}, { 784, 300}, { 784, 300}, { 698, 300},
-    { 698, 300}, { 659, 300}, { 659, 300}, { 587, 600}, { 523, 300}, { 523, 300},
-    { 784, 300}, { 784, 300}, { 880, 300}, { 880, 300}, { 784, 600}, { 698, 300},
-    { 698, 300}, { 659, 300}, { 659, 300}, { 587, 300}, { 587, 300}, { 523, 600},
+    { 523, 500}, { 523, 500}, { 784, 500}, { 784, 500}, { 880, 500}, { 880, 500},
+    { 784,1000}, { 698, 500}, { 698, 500}, { 659, 500}, { 659, 500}, { 587, 500},
+    { 587, 500}, { 523,1000}, { 784, 500}, { 784, 500}, { 698, 500}, { 698, 500},
+    { 659, 500}, { 659, 500}, { 587,1000}, { 784, 500}, { 784, 500}, { 698, 500},
+    { 698, 500}, { 659, 500}, { 659, 500}, { 587,1000}, { 523, 500}, { 523, 500},
+    { 784, 500}, { 784, 500}, { 880, 500}, { 880, 500}, { 784,1000}, { 698, 500},
+    { 698, 500}, { 659, 500}, { 659, 500}, { 587, 500}, { 587, 500}, { 523,1000},
 };
 
 /* 两只老虎（Frère Jacques，法国民谣，公有领域） —— 默认 300 ms/拍，32 个音符 */
@@ -176,12 +176,17 @@ const Song g_songs[] = {
 
 const uint8_t g_song_num = (uint8_t)(sizeof(g_songs) / sizeof(g_songs[0]));
 
+
 /* ------------------------------ 共用播放器 ------------------------------
-   非阻塞：Songs_Task() 在主循环里跑，BSP_BEEP_IsBusy() 说"上一个音放完了"，
-   就推下一个音；轮到休止符（hz=0）也一样占一个 ms 的静音。 */
+   非阻塞：Songs_Task() 在主循环里跑。
+   断奏：每个音只"响" 90% 的时长、留 10% 静默（参考 robsoncouto/arduino-songs
+   "play the note for 90% of the duration" 的做法）——音与音之间留缝，旋律才清
+   晰；连着响是一串"嘟嘟嘟"，几乎没有节奏感。
+   休止符（hz=0）：整段静默。 */
 static uint8_t  cur_idx;
 static uint8_t  playing;
 static uint16_t pos;
+static uint32_t note_end;      /* 当前音符（含尾部 10% 静默）结束的时刻 */
 
 void Songs_Play(uint8_t idx)
 {
@@ -189,9 +194,10 @@ void Songs_Play(uint8_t idx)
     {
         return;
     }
-    cur_idx = (uint8_t)(idx % g_song_num);
-    pos     = 0U;
-    playing = 1U;
+    cur_idx  = (uint8_t)(idx % g_song_num);
+    pos      = 0U;
+    playing  = 1U;
+    note_end = 0U;
     BSP_UART_Printf("[song] play %u/%u  %s\r\n",
                     (unsigned)(cur_idx + 1U), (unsigned)g_song_num, g_songs[cur_idx].name);
 }
@@ -202,8 +208,9 @@ void Songs_Next(void)
     {
         return;
     }
-    playing = 0U;
-    pos     = 0U;
+    playing  = 0U;
+    pos      = 0U;
+    note_end = 0U;
     BSP_BEEP_Off();
     cur_idx = (uint8_t)((cur_idx + 1U) % g_song_num);
     BSP_UART_Printf("[song] next %u/%u  %s\r\n",
@@ -212,15 +219,17 @@ void Songs_Next(void)
 
 void Songs_Stop(void)
 {
-    playing = 0U;
-    pos     = 0U;
+    playing  = 0U;
+    pos      = 0U;
+    note_end = 0U;
     BSP_BEEP_Off();
     BSP_UART_Printf("[song] stop\r\n");
 }
 
 void Songs_Pause(void)
 {
-    playing = 0U;
+    playing  = 0U;
+    note_end = 0U;                 /* 恢复时立即从下一个音开始，不等剩余间隙 */
     BSP_BEEP_Off();
     BSP_UART_Printf("[song] pause at %u/%u\r\n", (unsigned)pos, (unsigned)Songs_Len());
 }
@@ -236,7 +245,8 @@ void Songs_Resume(void)
     {
         pos = 0U;
     }
-    playing = 1U;
+    playing  = 1U;
+    note_end = 0U;
     BSP_UART_Printf("[song] resume %u/%u  %s  @%u\r\n",
                     (unsigned)(cur_idx + 1U), (unsigned)g_song_num,
                     g_songs[cur_idx].name, (unsigned)pos);
@@ -245,8 +255,14 @@ void Songs_Resume(void)
 void Songs_Task(void)
 {
     const Song *s;
+    const Note *n;
+    uint16_t    on_ms;
 
-    if ((playing == 0U) || (BSP_BEEP_IsBusy() != 0U))
+    if (playing == 0U)
+    {
+        return;
+    }
+    if (HAL_GetTick() < note_end)        /* 当前音的"音 + 尾部静默"还没走完 */
     {
         return;
     }
@@ -254,12 +270,26 @@ void Songs_Task(void)
     s = &g_songs[cur_idx];
     if (pos >= s->len)
     {
-        playing = 0U;                        /* 播完收工（不自动循环） */
+        playing = 0U;                    /* 播完收工（不自动循环） */
         BSP_UART_Printf("[song] done  %s\r\n", s->name);
         return;
     }
 
-    BSP_BEEP_PlayTone(s->notes[pos].hz, s->notes[pos].ms);
+    n = &s->notes[pos];
+    if (n->hz != 0U)
+    {
+        on_ms = (uint16_t)((uint32_t)n->ms * 9U / 10U);   /* 只响 90% */
+        if (on_ms == 0U)
+        {
+            on_ms = 1U;
+        }
+        BSP_BEEP_PlayTone(n->hz, on_ms);
+    }
+    else
+    {
+        BSP_BEEP_Off();                  /* 休止符：整段静默 */
+    }
+    note_end = HAL_GetTick() + n->ms;    /* 余下 10% 是音尾的静默 */
     pos++;
 }
 
@@ -268,3 +298,4 @@ uint8_t     Songs_Index(void)     { return cur_idx; }
 uint16_t    Songs_Pos(void)       { return pos; }
 uint16_t    Songs_Len(void)       { return g_songs[cur_idx].len; }
 const char *Songs_Name(void)      { return g_songs[cur_idx].name; }
+

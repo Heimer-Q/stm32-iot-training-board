@@ -19,7 +19,7 @@ def hz(name):
     return int(round(440.0 * (2.0 ** ((semi - 9) / 12.0 + (octv - 4)))))
 
 SONGS = [
- ("TWINKLE", 300, "小星星（Twinkle Twinkle，法国民谣，公有领域）",
+ ("TWINKLE", 500, "小星星（Twinkle Twinkle，法国民谣，公有领域）",
   "c5 c5 g5 g5 a5 a5 g5~ f5 f5 e5 e5 d5 d5 c5~ g5 g5 f5 f5 e5 e5 d5~ g5 g5 f5 f5 e5 e5 d5~ c5 c5 g5 g5 a5 a5 g5~ f5 f5 e5 e5 d5 d5 c5~"),
  ("TIGER", 300, "两只老虎（Frère Jacques，法国民谣，公有领域）",
   "c5 d5 e5 c5 c5 d5 e5 c5 e5 f5 g5~ e5 f5 g5~ g5 a5 g5 f5 e5 c5 g5 a5 g5 f5 e5 c5 c5 g4 c5~ c5 g4 c5~"),
@@ -100,9 +100,148 @@ typedef struct
 extern const Song    g_songs[];
 extern const uint8_t g_song_num;
 
+/* ---- 共用播放器（非阻塞：主循环里调 Songs_Task()）----
+   06 蜂鸣器例程和 99 全功能的音乐页都用这一套，别再各写一份。 */
+void        Songs_Play(uint8_t idx);        /* 从第 idx 首的开头开始播 */
+void        Songs_Next(void);               /* 切到下一首并停在待播（不自动播） */
+void        Songs_Stop(void);               /* 停止并回到开头 */
+void        Songs_Pause(void);              /* 暂停：停在当前位置 */
+void        Songs_Resume(void);             /* 从暂停处继续；播完/停在开头则从头播 */
+void        Songs_Task(void);               /* 主循环里调：音 + 尾部静默走完推下一个 */
+uint8_t     Songs_IsPlaying(void);          /* 1 = 正在播 */
+uint8_t     Songs_Index(void);              /* 当前第几首（0 起） */
+uint16_t    Songs_Pos(void);                /* 播到第几个音（0 起） */
+uint16_t    Songs_Len(void);                /* 当前曲子的音符数 */
+const char *Songs_Name(void);               /* 当前曲名（ASCII） */
+
 #endif /* __APP_SONGS_H */
 ''' % (len(songs), total_notes, data_bytes)
 io.open(os.path.join(T, 'App', 'Inc', 'app_songs.h'), 'w', encoding='utf-8', newline='\n').write(h)
+
+PLAYER = r"""
+/* ------------------------------ 共用播放器 ------------------------------
+   非阻塞：Songs_Task() 在主循环里跑。
+   断奏：每个音只"响" 90% 的时长、留 10% 静默（参考 robsoncouto/arduino-songs
+   "play the note for 90% of the duration" 的做法）——音与音之间留缝，旋律才清
+   晰；连着响是一串"嘟嘟嘟"，几乎没有节奏感。
+   休止符（hz=0）：整段静默。 */
+static uint8_t  cur_idx;
+static uint8_t  playing;
+static uint16_t pos;
+static uint32_t note_end;      /* 当前音符（含尾部 10% 静默）结束的时刻 */
+
+void Songs_Play(uint8_t idx)
+{
+    if (g_song_num == 0U)
+    {
+        return;
+    }
+    cur_idx  = (uint8_t)(idx % g_song_num);
+    pos      = 0U;
+    playing  = 1U;
+    note_end = 0U;
+    BSP_UART_Printf("[song] play %u/%u  %s\r\n",
+                    (unsigned)(cur_idx + 1U), (unsigned)g_song_num, g_songs[cur_idx].name);
+}
+
+void Songs_Next(void)
+{
+    if (g_song_num == 0U)
+    {
+        return;
+    }
+    playing  = 0U;
+    pos      = 0U;
+    note_end = 0U;
+    BSP_BEEP_Off();
+    cur_idx = (uint8_t)((cur_idx + 1U) % g_song_num);
+    BSP_UART_Printf("[song] next %u/%u  %s\r\n",
+                    (unsigned)(cur_idx + 1U), (unsigned)g_song_num, g_songs[cur_idx].name);
+}
+
+void Songs_Stop(void)
+{
+    playing  = 0U;
+    pos      = 0U;
+    note_end = 0U;
+    BSP_BEEP_Off();
+    BSP_UART_Printf("[song] stop\r\n");
+}
+
+void Songs_Pause(void)
+{
+    playing  = 0U;
+    note_end = 0U;                 /* 恢复时立即从下一个音开始，不等剩余间隙 */
+    BSP_BEEP_Off();
+    BSP_UART_Printf("[song] pause at %u/%u\r\n", (unsigned)pos, (unsigned)Songs_Len());
+}
+
+void Songs_Resume(void)
+{
+    if (g_song_num == 0U)
+    {
+        return;
+    }
+
+    if (pos >= g_songs[cur_idx].len)     /* 播完过 / 停在开头：从头来 */
+    {
+        pos = 0U;
+    }
+    playing  = 1U;
+    note_end = 0U;
+    BSP_UART_Printf("[song] resume %u/%u  %s  @%u\r\n",
+                    (unsigned)(cur_idx + 1U), (unsigned)g_song_num,
+                    g_songs[cur_idx].name, (unsigned)pos);
+}
+
+void Songs_Task(void)
+{
+    const Song *s;
+    const Note *n;
+    uint16_t    on_ms;
+
+    if (playing == 0U)
+    {
+        return;
+    }
+    if (HAL_GetTick() < note_end)        /* 当前音的"音 + 尾部静默"还没走完 */
+    {
+        return;
+    }
+
+    s = &g_songs[cur_idx];
+    if (pos >= s->len)
+    {
+        playing = 0U;                    /* 播完收工（不自动循环） */
+        BSP_UART_Printf("[song] done  %s\r\n", s->name);
+        return;
+    }
+
+    n = &s->notes[pos];
+    if (n->hz != 0U)
+    {
+        on_ms = (uint16_t)((uint32_t)n->ms * 9U / 10U);   /* 只响 90% */
+        if (on_ms == 0U)
+        {
+            on_ms = 1U;
+        }
+        BSP_BEEP_PlayTone(n->hz, on_ms);
+    }
+    else
+    {
+        BSP_BEEP_Off();                  /* 休止符：整段静默 */
+    }
+    note_end = HAL_GetTick() + n->ms;    /* 余下 10% 是音尾的静默 */
+    pos++;
+}
+
+uint8_t     Songs_IsPlaying(void) { return playing; }
+uint8_t     Songs_Index(void)     { return cur_idx; }
+uint16_t    Songs_Pos(void)       { return pos; }
+uint16_t    Songs_Len(void)       { return g_songs[cur_idx].len; }
+const char *Songs_Name(void)      { return g_songs[cur_idx].name; }
+"""
+
 
 # ---------- app_songs.c ----------
 lines = ['''/**
@@ -115,6 +254,8 @@ lines = ['''/**
   ****************************************************************************** */
 
 #include "app_songs.h"
+#include "bsp_beep.h"      /* 播放器直接用蜂鸣器 BSP */
+#include "bsp_uart.h"      /* 串口报曲名/进度，方便验证 */
 
 ''']
 for (name, ms, note, notes) in songs:
@@ -132,7 +273,7 @@ for (name, ms, note, notes) in songs:
     lines.append('    { "%s", s_%s, %dU },' % (name, name.lower(), len(notes)))
 lines.append('};\n')
 lines.append('const uint8_t g_song_num = (uint8_t)(sizeof(g_songs) / sizeof(g_songs[0]));')
-io.open(os.path.join(T, 'App', 'Src', 'app_songs.c'), 'w', encoding='utf-8', newline='\n').write('\n'.join(lines) + '\n')
+io.open(os.path.join(T, 'App', 'Src', 'app_songs.c'), 'w', encoding='utf-8', newline='\n').write('\n'.join(lines) + '\n\n' + PLAYER + '\n')
 
 print('生成完成：%d 首、%d 个音符、数据 %d 字节（%.2f KB）' % (len(songs), total_notes, data_bytes, data_bytes/1024))
 for (name, ms, note, notes) in songs:
