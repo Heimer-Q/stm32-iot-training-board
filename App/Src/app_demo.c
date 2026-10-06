@@ -42,7 +42,7 @@
 
 /* ------------------------------- 状态 ------------------------------- */
 /* 画面顺序（也是 K1 短按的循环顺序 + 上电默认停在第一页）
-   0 信息页（班级+姓名）→ 1 系统状态页 → 2 时钟页 → 3 图片页（动图） */
+   0 信息页（班级+姓名+日期时间）→ 1 参数/状态页（THR/MID/HIGH）→ 2 时钟页（只显示时间）→ 3 图片页（动图） */
 typedef enum { SCR_INFO = 0, SCR_STATUS, SCR_CLOCK, SCR_IMAGE, SCR_NUM } ScreenId;
 typedef enum { MODE_NORMAL = 0, MODE_LIGHT, MODE_THERMAL, MODE_NUM } WorkMode;
 enum { TU_YEAR = 0, TU_MONTH, TU_DAY, TU_HOUR, TU_MIN, TU_SEC, TU_NUM };
@@ -51,6 +51,7 @@ static ScreenId screen   = SCR_INFO;
 static WorkMode mode     = MODE_NORMAL;
 static uint8_t  time_set;
 static uint8_t  k3_swallow;   /* 进时间设置那一次是按着 K3 完成的：松手前吞掉 K3 事件，避免顺手改时间 */
+static uint8_t  thr_sel;      /* 状态页当前选中的参数：0=THR 1=MID 2=HIGH */
 static uint8_t  time_unit;
 static uint8_t  anim_idx;                               /* 当前是第几张动图 */
 static uint8_t  gif_frame;                              /* 当前动图播到第几帧 */
@@ -305,6 +306,61 @@ static uint8_t wrap_u8(int32_t v, int32_t lo, int32_t hi)
     return (uint8_t)v;
 }
 
+/* --------------------- 参数/状态页：调 THR / MID / HIGH ---------------------
+   THR  = 光控上限（百分比，5—95 循环）
+   MID  = 热敏"开始亮"的起点（原始码，步长 ≈1%）
+   HIGH = 热敏"最亮"的终点（原始码；按 CFG_TEMP_INVERT 保持 HIGH 比 MID 更"热"）
+   调完即时生效：lamp_update() 在主循环里紧跟 handle_keys()，光控/热控下灯会立刻跟着变。 */
+#define THR_TEMP_STEP   ((int32_t)(4095U / 100U))   /* 温度阈值步长 ≈ 1% */
+
+static void thr_step(int32_t dir)
+{
+    int32_t v;
+
+    if (thr_sel == 0U)
+    {
+        light_thr = wrap_u8((int32_t)light_thr + dir, 5, 95);
+        BSP_UART_Printf("[thr ] THR=%d%%   LGT=%d%%\r\n", light_thr, BSP_ADC_LightPercent());
+        return;
+    }
+
+    v = (thr_sel == 1U) ? (int32_t)temp_mid : (int32_t)temp_high;
+    v += dir * THR_TEMP_STEP;
+    if (v < 100)  v = 100;
+    if (v > 4000) v = 4000;
+
+    if (thr_sel == 1U) temp_mid  = (uint16_t)v;
+    else               temp_high = (uint16_t)v;
+
+#if CFG_TEMP_INVERT
+    if (temp_high >= temp_mid)  temp_high = (uint16_t)((temp_mid > 200U) ? (temp_mid - 100U) : 100U);
+#else
+    if (temp_high <= temp_mid)  temp_high = (uint16_t)(temp_mid + 100U);
+#endif
+    BSP_UART_Printf("[thr ] MID=%u(%u%%)  HIGH=%u(%u%%)  rawT=%u\r\n",
+                    temp_mid, (unsigned)raw_to_pct(temp_mid),
+                    temp_high, (unsigned)raw_to_pct(temp_high),
+                    BSP_ADC_GetRaw(BSP_ADC_CH_TEMP));
+}
+
+static void thr_reset(void)
+{
+    if (thr_sel == 0U)
+    {
+        light_thr = CFG_LIGHT_THR_DEFAULT;
+    }
+    else if (thr_sel == 1U)
+    {
+        temp_mid = (uint16_t)(4095UL * CFG_TEMP_MID_PCT / 100UL);
+    }
+    else
+    {
+        temp_high = (uint16_t)(4095UL * CFG_TEMP_HIGH_PCT / 100UL);
+    }
+    BSP_UART_Printf("[thr ] reset sel=%u -> THR=%d%%  MID=%u  HIGH=%u\r\n",
+                    thr_sel, light_thr, temp_mid, temp_high);
+}
+
 /* 改一个单位并立即覆盖 RTC */
 static void time_step(int32_t delta)
 {
@@ -344,23 +400,12 @@ static void draw_clock(void)
     }
     else
     {
+        char buf[12];
+
+        /* 普通模式：这一页只显示时间（2026-10-06 会长要求，日期/光照/温度都不在这页） */
         rtc_load();
-        /* 第一行左边顺便报当前模式（光控/热控时一眼能看到） */
-        line_printf(0, "%s %02d:%02d:%02d",
-                    (mode == MODE_LIGHT) ? "LIGHT" : ((mode == MODE_THERMAL) ? "THERM" : "TIME "),
-                    t_hour, t_min, t_sec);
-        line_printf(1, "DATE 20%02d-%02d-%02d", t_year, t_month, t_day);
-        /* 和下一行同一套格式：值% 阈值 结果(该亮几颗)
-           LGT 77% T77 N0  /  TMP 48% M47 N0 */
-        line_printf(2, "LGT %3d%% T%2d N%d",
-                    (unsigned)BSP_ADC_LightPercent(),
-                    (unsigned)light_thr,
-                    light_band_count());
-        /* 温度：当前百分比 + 起点阈值 + 该亮几颗（0—3） */
-        line_printf(3, "TMP %3d%% M%2d N%d",
-                    (unsigned)temp_percent(),
-                    (unsigned)raw_to_pct(temp_mid),
-                    temp_band_count());
+        (void)snprintf(buf, sizeof(buf), "%02d:%02d:%02d", t_hour, t_min, t_sec);
+        show_line_center(1U, buf);
     }
 }
 
@@ -375,28 +420,44 @@ static void draw_image(void)
     OLED_DrawBitmap(&g_oled, a->w, a->h, a->frames[gif_frame % a->count]);
 }
 
+/* 参数/状态页（2026-10-06 重构）：
+   第 1—3 行 = 三个可调参数（当前选中的那行"白底黑字"反白，只包文字）；
+   第 4 行 = 当前模式 + 两个实测值（光照% / 温度%）。
+   按键：K2 单击切参数、K2 长按 +1、K3 长按 −1、K3 单击恢复默认（见 handle_keys）。 */
 static void draw_status(void)
 {
-    uint32_t up = (HAL_GetTick() - boot_ms) / 1000U;
+    char buf[20];
+    uint8_t i;
 
-    /* 热控模式下顺便把高温阈值显示在标题行（调 K3 时能看见） */
-    if (mode == MODE_THERMAL)
+    for (i = 0U; i < 3U; i++)
     {
-        line_printf(0, "MODE %s H%d", mode_name(), (unsigned)raw_to_pct(temp_high));
+        switch (i)
+        {
+            case 0U:
+                (void)snprintf(buf, sizeof(buf), "THR  %2d%%   L %2d%%",
+                               (int)light_thr, (int)BSP_ADC_LightPercent());
+                break;
+            case 1U:
+                (void)snprintf(buf, sizeof(buf), "MID  %2d%%   T %2d%%",
+                               (int)raw_to_pct(temp_mid), (int)temp_percent());
+                break;
+            default:
+                (void)snprintf(buf, sizeof(buf), "HIGH %2d%%", (int)raw_to_pct(temp_high));
+                break;
+        }
+
+        if (i == thr_sel)
+        {
+            BSP_OLED_DrawTextInverse((int16_t)((i + 1U) * line_h), buf);   /* 白底黑字＝当前在调这个 */
+        }
+        else
+        {
+            show_line_center(i, buf);
+        }
     }
-    else
-    {
-        line_printf(0, "MODE %s", mode_name());
-    }
-    line_printf(1, "UP %02lu:%02lu:%02lu",
-                (unsigned long)(up / 3600U),
-                (unsigned long)((up / 60U) % 60U),
-                (unsigned long)(up % 60U));
-    /* 和时钟页同一套格式：值% 阈值 该亮几颗 */
-    line_printf(2, "LGT %3d%% T%2d N%d",
-                BSP_ADC_LightPercent(), (unsigned)light_thr, light_band_count());
-    line_printf(3, "TMP %3d%% M%2d N%d",
-                (unsigned)temp_percent(), (unsigned)raw_to_pct(temp_mid), temp_band_count());
+
+    (void)snprintf(buf, sizeof(buf), "MODE %s", mode_name());
+    show_line_center(3U, buf);
 }
 
 /* 信息页：前三行是学生字库里的中文（生成时用 | 分隔），第 4 行显示"日期 + 时间" */
@@ -521,6 +582,20 @@ static void handle_keys(void)
         if ((e3 == BSP_KEY_EVENT_LONG) || (e3 == BSP_KEY_EVENT_LONG_REPEAT)) time_step(+1);
         return;
     }
+    /* ---------- 参数/状态页：K2 单击＝切参数；K2 长按＝+1、K3 长按＝−1；K3 单击＝恢复默认 ---------- */
+    if (screen == SCR_STATUS)
+    {
+        if (e2 == BSP_KEY_EVENT_CLICK)
+        {
+            thr_sel = (uint8_t)((thr_sel + 1U) % 3U);
+            BSP_UART_Printf("[thr ] select %u (0=THR 1=MID 2=HIGH)\r\n", thr_sel);
+        }
+        if ((e2 == BSP_KEY_EVENT_LONG) || (e2 == BSP_KEY_EVENT_LONG_REPEAT)) thr_step(+1);
+        if ((e3 == BSP_KEY_EVENT_LONG) || (e3 == BSP_KEY_EVENT_LONG_REPEAT)) thr_step(-1);
+        if (e3 == BSP_KEY_EVENT_CLICK) thr_reset();
+        return;
+    }
+
     /* ---------- 图片页：短按换动图，长按调速度 ---------- */
     if (screen == SCR_IMAGE)
     {
@@ -557,38 +632,25 @@ static void handle_keys(void)
         return;
     }
 
-    /* ---------- 光控模式：K2/K3 调阈值 ---------- */
-    if (mode == MODE_LIGHT)
+    /* ---------- 时钟页 K3 长按：进时间设置（任何模式下都能进） ---------- */
+    if (e3 == BSP_KEY_EVENT_LONG)
     {
-        if (e2 == BSP_KEY_EVENT_LONG)          light_thr = wrap_u8((int32_t)light_thr - 10, 5, 95);
-        if (e2 == BSP_KEY_EVENT_CLICK)         light_thr = wrap_u8((int32_t)light_thr - 1,  5, 95);
-        if (e2 == BSP_KEY_EVENT_LONG_REPEAT)   light_thr = wrap_u8((int32_t)light_thr - 1,  5, 95);
-        if (e3 == BSP_KEY_EVENT_LONG)          light_thr = wrap_u8((int32_t)light_thr + 10, 5, 95);
-        if (e3 == BSP_KEY_EVENT_CLICK)         light_thr = wrap_u8((int32_t)light_thr + 1,  5, 95);
-        if (e3 == BSP_KEY_EVENT_LONG_REPEAT)   light_thr = wrap_u8((int32_t)light_thr + 1,  5, 95);
-        BSP_UART_Printf("[light] thr=%d%%  lgt=%d%%\r\n", light_thr, BSP_ADC_LightPercent());
+        screen     = SCR_CLOCK;
+        time_set   = 1U;
+        time_unit  = TU_HOUR;
+        k3_swallow = 1U;                 /* 松手前吞掉 K3 的后续事件 */
+        rtc_load();
+        if (oled_ok) OLED_Clear(&g_oled);
+        BSP_UART_Printf("[time] enter set (K3 hold)\r\n");
         return;
     }
 
-    /* ---------- 热控模式：K2 调中温 / K3 调高温 ---------- */
-    if (mode == MODE_THERMAL)
+    /* ---------- 手动灯控（信息页/时钟页）：只在常态模式下生效 ----------
+       光控/热控模式下灯由传感器控制，这些键不响应；想手动控灯先按 K1 长按切回常态。
+       阈值的调整已挪到上面的"参数/状态页"分支，跟模式脱钩。 */
+    if (mode != MODE_NORMAL)
     {
-        if (e2 == BSP_KEY_EVENT_LONG)        temp_mid = (uint16_t)((temp_mid > 300U) ? (temp_mid - 200U) : 100U);
-        if (e2 == BSP_KEY_EVENT_CLICK)       temp_mid = (uint16_t)((temp_mid > 100U) ? (temp_mid - 50U)  : 100U);
-        if (e2 == BSP_KEY_EVENT_LONG_REPEAT) temp_mid = (uint16_t)((temp_mid > 100U) ? (temp_mid - 50U)  : 100U);
-#if CFG_TEMP_INVERT
-        if (e3 == BSP_KEY_EVENT_LONG)        temp_high = (uint16_t)((temp_high > 200U) ? (temp_high - 200U) : 100U);
-        if (e3 == BSP_KEY_EVENT_CLICK)       temp_high = (uint16_t)((temp_high > 100U) ? (temp_high - 50U)  : 100U);
-        if (e3 == BSP_KEY_EVENT_LONG_REPEAT) temp_high = (uint16_t)((temp_high > 100U) ? (temp_high - 50U)  : 100U);
-        if (temp_high >= temp_mid)           temp_high = (uint16_t)((temp_mid > 200U) ? (temp_mid - 100U) : 100U);
-#else
-        if (e3 == BSP_KEY_EVENT_LONG)        temp_high += 200U;
-        if (e3 == BSP_KEY_EVENT_CLICK)       temp_high += 50U;
-        if (e3 == BSP_KEY_EVENT_LONG_REPEAT) temp_high += 50U;
-        if (temp_high <= temp_mid)           temp_high = (uint16_t)(temp_mid + 100U);
-#endif
-        BSP_UART_Printf("[temp ] mid=%u high=%u  raw=%u\r\n",
-                        temp_mid, temp_high, BSP_ADC_GetRaw(BSP_ADC_CH_TEMP));
+        BSP_UART_Printf("[lamp] manual keys ignored in %s mode\r\n", mode_name());
         return;
     }
 
@@ -627,23 +689,6 @@ static void handle_keys(void)
         lamp_breath = (uint8_t)(!lamp_breath);
         BSP_UART_Printf("[lamp] breath %s\r\n", lamp_breath ? "ON" : "OFF");
     }
-    if (e3 == BSP_KEY_EVENT_LONG)                  /* K3 长按 = 进时间设置（自动跳到时钟页） */
-    {
-        screen     = SCR_CLOCK;
-        time_set   = 1U;
-        time_unit  = TU_HOUR;
-        k3_swallow = 1U;                 /* 松手前吞掉 K3 的后续事件 */
-        rtc_load();
-        if (oled_ok) OLED_Clear(&g_oled);
-        BSP_UART_Printf("[time] enter set (K3 hold)\r\n");
-    }
-    if (e3 == BSP_KEY_EVENT_DOUBLE)                /* 阈值恢复默认 */
-    {
-        light_thr = CFG_LIGHT_THR_DEFAULT;
-        temp_mid  = (uint16_t)(4095UL * CFG_TEMP_MID_PCT  / 100UL);
-        temp_high = (uint16_t)(4095UL * CFG_TEMP_HIGH_PCT / 100UL);
-        BSP_UART_Printf("[thr ] reset to %u%% / %u / %u\r\n", light_thr, temp_mid, temp_high);
-    }
 }
 
 /* ------------------------------ 入口 ------------------------------ */
@@ -681,7 +726,7 @@ void APP_Demo_Init(void)
     BSP_UART_Printf("[tips] K1 click=next page, hold(only on STATUS)=mode 1/2/3 beeps | time set: K2 hold=- K3 hold=+ K1=exit | lock removed\r\n");
 
     lamp_sel = 0U; lamp_all = 0U; lamp_on = 0U; lamp_breath = 0U; lamp_flow = 0U;
-    screen = SCR_INFO; mode = MODE_NORMAL; time_set = 0U; k3_swallow = 0U;
+    screen = SCR_INFO; mode = MODE_NORMAL; time_set = 0U; k3_swallow = 0U; thr_sel = 0U;
 
     boot_ms = HAL_GetTick();
     t_adc = t_draw = t_beat = boot_ms;
