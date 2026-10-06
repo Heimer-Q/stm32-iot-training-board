@@ -13,8 +13,8 @@
   *     信息页：无动作
   *     状态页：K2 单击＝切参数（THR->MID->HIGH）、K2 长按＝+1、K3 长按＝-1、K3 单击＝恢复默认
   *     时间页：K3 长按＝进时间设置
-  *     灯控页：K2 单击＝选下一颗灯、K2 长按＝全亮⇄全灭；
-  *             K3 单击＝呼吸⇄常亮、K3 长按＝流水灯开/关
+  *     灯控页：K2 单击＝选下一颗、K2 双击＝呼吸⇄常亮、K2 长按＝全亮⇄全灭；
+  *             K3 单击＝开/关选中的那颗、K3 长按＝流水灯开/关
   *     图片页：K2/K3 单击＝上一张/下一张动图，长按＝变慢/变快
   *     音乐页：K2 单击＝播放/暂停（暂停后从当前音符继续）、K3 单击＝切歌（停到待播）
   *   （光控 / 热控模式下，灯控页的手动键不响应——灯由传感器控制）
@@ -65,7 +65,7 @@ static uint16_t gif_delay_ms;                           /* 每帧时长，可在
 static uint32_t t_gif;
 
 /* 灯 */
-static uint8_t lamp_sel, lamp_all, lamp_on, lamp_breath, lamp_flow;
+static uint8_t lamp_sel, lamp_mask, lamp_breath, lamp_flow;   /* mask: bit0/1/2 = LED1/2/3 亮灭 */
 
 /* 阈值（按键可调） */
 static uint8_t  light_thr = CFG_LIGHT_THR_DEFAULT;   /* 光控：低于这个光照百分比开始点灯 */
@@ -259,16 +259,15 @@ static void lamp_update(void)
         uint8_t pos = (uint8_t)((now / 200U) % LED_NUM);
         for (i = 0U; i < LED_NUM; i++) duty[i] = (i == pos) ? 100U : 0U;
     }
-    else if (lamp_all || lamp_on)         /* 手动：全亮 / 单灯 */
+    else if (lamp_mask != 0U)             /* 手动：按位亮灯（每颗独立开/关） */
     {
         uint8_t base = lamp_breath ? breath_level(now) : 100U;
-        if (lamp_all)
+        for (i = 0U; i < LED_NUM; i++)
         {
-            for (i = 0U; i < LED_NUM; i++) duty[i] = base;
-        }
-        else
-        {
-            duty[lamp_sel % LED_NUM] = base;
+            if (lamp_mask & (uint8_t)(1U << i))
+            {
+                duty[i] = base;
+            }
         }
     }
 
@@ -482,35 +481,40 @@ static void draw_status(void)
 
 /* 灯控页（2026-10-06 新增）：手动控灯都集中到这一页（原来散在信息页/时钟页）。
    第 4 行：常态模式显示键位提示；光控/热控显示模式名（此时手动键不响应，灯由传感器控制）。 */
+/* 灯控页（2026-10-06 晚二版）：三颗灯独立开关。
+   第 1 行 = 三个状态位（1=亮 0=灭，从左到右 LED1/2/3），当前选中的那位反白；
+   K2 单击＝选下一颗、K2 双击＝呼吸⇄常亮、K2 长按＝全亮⇄全灭；
+   K3 单击＝开/关选中的那颗、K3 长按＝流水灯开/关。 */
 static void draw_lamp(void)
 {
-    char buf[20];
+    char     buf[20];
+    char     seg[2];
+    uint16_t w;
+    int16_t  x;
+    int16_t  y = (int16_t)(1U * line_h);
 
-    (void)snprintf(buf, sizeof(buf), "LAMP  LED %u/%u",
-                   (unsigned)(lamp_sel + 1U), (unsigned)LED_NUM);
-    show_line_center(0U, buf);
+    /* 第 1 行：LAMP + 三个状态位（先整行画，再把选中位反白） */
+    (void)snprintf(buf, sizeof(buf), "LAMP  %d %d %d",
+                   (lamp_mask & 0x1U) ? 1 : 0,
+                   (lamp_mask & 0x2U) ? 1 : 0,
+                   (lamp_mask & 0x4U) ? 1 : 0);
+    w = OLED_GetStrWidth(&g_oled, buf);
+    x = (int16_t)((128 - (int16_t)w) / 2);
+    OLED_SetCursor(&g_oled, x, y);
+    OLED_DrawString(&g_oled, buf);
 
-    (void)snprintf(buf, sizeof(buf), "ALL:%s FLOW:%s",
-                   lamp_all ? "ON" : "OFF", lamp_flow ? "ON" : "OFF");
+    seg[0] = (char)('0' + ((lamp_mask >> lamp_sel) & 1U));
+    seg[1] = '\0';
+    BSP_OLED_DrawTextInverseAt((int16_t)(x + (int16_t)(6U + 2U * lamp_sel) * 8), y, seg);
+
+    (void)snprintf(buf, sizeof(buf), "FLOW:%d BRTH:%d",
+                   lamp_flow ? 1 : 0, lamp_breath ? 1 : 0);
     show_line_center(1U, buf);
 
-    (void)snprintf(buf, sizeof(buf), "BREATH:%s", lamp_breath ? "ON" : "OFF");
-    show_line_center(2U, buf);
-
-    if (mode == MODE_NORMAL)
-    {
-        show_line_center(3U, "K2:SEL K3:BRTH");
-    }
-    else
-    {
-        (void)snprintf(buf, sizeof(buf), "MODE %s", mode_name());
-        show_line_center(3U, buf);
-    }
+    show_line_center(2U, "K2 SEL  K3 TOG");
+    show_line_center(3U, "K2H:ALL K3H:FLOW");
 }
 
-/* 音乐页（2026-10-06 新增）：曲库播放（数据与播放器在 App/Src/app_songs.c）。
-   K2 单击＝播放/暂停（暂停后从当前音符继续）、K3 单击＝切歌（停到待播）；
-   离开这一页歌自动暂停（K1 切页时处理，见 handle_keys）。 */
 static void draw_music(void)
 {
     char        buf[20];
@@ -739,54 +743,43 @@ static void handle_keys(void)
         return;
     }
 
-    /* ---------- 灯控页：手动控灯集中在这一页（原来散在信息页/时钟页） ----------
-       K2 单击＝选下一颗灯、K2 长按＝全亮⇄全灭；K3 单击＝呼吸⇄常亮、K3 长按＝流水灯开/关。
-       光控/热控模式下灯由传感器控制，手动键不响应。 */
+    /* ---------- 灯控页：三颗灯独立开关 ----------
+       K2 单击＝选下一颗、K2 双击＝呼吸⇄常亮、K2 长按＝全亮⇄全灭；
+       K3 单击＝开/关选中的那颗、K3 长按＝流水灯开/关。
+       进本页按任何键＝自动回到常态（灯由手动控制）。 */
     if (screen == SCR_LAMP)
     {
-        /* 灯控页＝手动控灯：如果当前在光控/热控，先自动切回常态，
-           免得按键"没反应"（2026-10-06 会长实测反馈） */
+        /* 如果当前在光控/热控，先自动切回常态，免得按键"没反应" */
         if (mode != MODE_NORMAL)
         {
             BSP_UART_Printf("[lamp] auto back to NORMAL (was %s)\r\n", mode_name());
             mode = MODE_NORMAL;
         }
 
-        if (e2 == BSP_KEY_EVENT_CLICK)                 /* 选下一颗灯 */
+        if (e2 == BSP_KEY_EVENT_CLICK)                 /* 选下一颗（只动选中） */
         {
-            lamp_flow = 0U;
-            lamp_all  = 0U;
-            if (lamp_on) lamp_sel = (uint8_t)((lamp_sel + 1U) % LED_NUM);
-            else         { lamp_sel = 0U; lamp_on = 1U; }
-            BSP_UART_Printf("[lamp] -> LED%d\r\n", lamp_sel + 1);
+            lamp_sel = (uint8_t)((lamp_sel + 1U) % LED_NUM);
+            BSP_UART_Printf("[lamp] sel -> LED%d\r\n", lamp_sel + 1);
         }
-        if (e2 == BSP_KEY_EVENT_LONG)                  /* 全亮 ⇄ 全灭（同一个键切换） */
+        if (e2 == BSP_KEY_EVENT_DOUBLE)                /* 呼吸 ⇄ 常亮 */
         {
-            lamp_flow = 0U;
-            if (lamp_all)
-            {
-                lamp_all = 0U;
-                lamp_on  = 0U;
-                BSP_UART_Printf("[lamp] ALL OFF\r\n");
-            }
-            else
-            {
-                lamp_all = 1U;
-                lamp_on  = 1U;
-                BSP_UART_Printf("[lamp] ALL ON\r\n");
-            }
-        }
-        if (e3 == BSP_KEY_EVENT_CLICK)                 /* 呼吸 ⇄ 常亮 */
-        {
-            if ((lamp_on == 0U) && (lamp_all == 0U))   /* 灯全灭时先点亮一盏：任何按键都有反馈 */
-            {
-                lamp_sel = 0U;
-                lamp_on  = 1U;
-            }
             lamp_breath = (uint8_t)(!lamp_breath);
             BSP_UART_Printf("[lamp] breath %s\r\n", lamp_breath ? "ON" : "OFF");
         }
-        if (e3 == BSP_KEY_EVENT_LONG)                  /* 流水灯开/关（2026-10-06 从 K2 双击挪来） */
+        if (e2 == BSP_KEY_EVENT_LONG)                  /* 全亮 ⇄ 全灭 */
+        {
+            lamp_flow = 0U;
+            lamp_mask = (lamp_mask == 0x07U) ? 0x00U : 0x07U;
+            BSP_UART_Printf("[lamp] ALL %s\r\n", (lamp_mask == 0x07U) ? "ON" : "OFF");
+        }
+        if (e3 == BSP_KEY_EVENT_CLICK)                 /* 开/关选中的那颗 */
+        {
+            lamp_flow = 0U;
+            lamp_mask ^= (uint8_t)(1U << lamp_sel);
+            BSP_UART_Printf("[lamp] LED%d %s  mask=%d\r\n", lamp_sel + 1,
+                            (lamp_mask & (1U << lamp_sel)) ? "ON" : "OFF", lamp_mask);
+        }
+        if (e3 == BSP_KEY_EVENT_LONG)                  /* 流水灯开/关 */
         {
             lamp_flow = (uint8_t)(!lamp_flow);
             BSP_UART_Printf("[lamp] flow %s\r\n", lamp_flow ? "ON" : "OFF");
@@ -848,7 +841,7 @@ void APP_Demo_Init(void)
     BSP_UART_Printf("[tips] 6 pages INFO>STATUS>CLOCK>LAMP>IMAGE>MUSIC; K1 click=next, K1 hold on STATUS=mode(1/2/3 beeps)\r\n");
     BSP_UART_Printf("[tips] STATUS: K2 sel/K2H+/K3H-/K3 reset | CLOCK: K3H=set | LAMP: K2 sel+ALL/K3 breath+flow | MUSIC: K2 play-pause/K3 next (%u songs)\r\n", (unsigned)g_song_num);
 
-    lamp_sel = 0U; lamp_all = 0U; lamp_on = 0U; lamp_breath = 0U; lamp_flow = 0U;
+    lamp_sel = 0U; lamp_mask = 0U; lamp_breath = 0U; lamp_flow = 0U;
     screen = SCR_INFO; mode = MODE_NORMAL; time_set = 0U; k3_swallow = 0U; thr_sel = 0U;
 
     boot_ms = HAL_GetTick();
@@ -909,7 +902,7 @@ void APP_Demo_Process(void)
         BSP_UART_Printf("[tick] scr=%d mode=%s lgt=%d%% rawT=%d TN%d lamp=%d/%d/%d/%d ev=%d/%d/%d\r\n",
                         (int)screen, mode_name(),
                         BSP_ADC_LightPercent(), BSP_ADC_GetRaw(BSP_ADC_CH_TEMP), temp_band_count(),
-                        lamp_on, lamp_all, lamp_breath, lamp_flow,
+                        lamp_mask, lamp_sel, lamp_breath, lamp_flow,
                         ev_click, ev_long, ev_dbl);
     }
 }
