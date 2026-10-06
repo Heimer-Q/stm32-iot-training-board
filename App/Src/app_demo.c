@@ -566,6 +566,7 @@ static void screen_draw(void)
     }
     else
     {
+        OLED_Clear(&g_oled);          /* 清屏再重画：数字/曲名长度变化时不留旧像素（2026-10-06 实机残影） */
         switch (screen)
         {
             case SCR_CLOCK:  draw_clock();  break;
