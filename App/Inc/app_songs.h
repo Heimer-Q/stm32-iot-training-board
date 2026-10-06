@@ -34,7 +34,8 @@ extern const uint8_t g_song_num;
 void        Songs_Play(uint8_t idx);        /* 从第 idx 首的开头开始播 */
 void        Songs_Next(void);               /* 切到下一首并停在待播（不自动播） */
 void        Songs_Stop(void);               /* 停止并回到开头 */
-void        Songs_Pause(void);              /* 暂停：停在当前位置（再 Play 会从头，见备注） */
+void        Songs_Pause(void);      /* 暂停：停在当前位置 */
+void        Songs_Resume(void);     /* 从暂停处继续；播完/停在开头则从头播 */
 void        Songs_Task(void);               /* 主循环里调：上一个音放完就推下一个 */
 uint8_t     Songs_IsPlaying(void);          /* 1 = 正在播 */
 uint8_t     Songs_Index(void);              /* 当前第几首（0 起） */

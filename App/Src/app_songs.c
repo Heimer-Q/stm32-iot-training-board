@@ -225,6 +225,23 @@ void Songs_Pause(void)
     BSP_UART_Printf("[song] pause at %u/%u\r\n", (unsigned)pos, (unsigned)Songs_Len());
 }
 
+void Songs_Resume(void)
+{
+    if (g_song_num == 0U)
+    {
+        return;
+    }
+
+    if (pos >= g_songs[cur_idx].len)     /* 播完过 / 停在开头：从头来 */
+    {
+        pos = 0U;
+    }
+    playing = 1U;
+    BSP_UART_Printf("[song] resume %u/%u  %s  @%u\r\n",
+                    (unsigned)(cur_idx + 1U), (unsigned)g_song_num,
+                    g_songs[cur_idx].name, (unsigned)pos);
+}
+
 void Songs_Task(void)
 {
     const Song *s;

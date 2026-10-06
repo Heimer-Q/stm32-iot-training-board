@@ -1,28 +1,33 @@
 /**
   ******************************************************************************
   * @file    app_demo.c
-  * @brief   全功能演示：4 画面 × 3 模式 + 时间设置（DEMO_FINAL；锁屏功能 2026-10-06 已移除）
+  * @brief   全功能演示：6 页面 x 3 模式 + 时间设置 + 曲库音乐页（DEMO_FINAL；锁屏 2026-10-06 已移除）
+  *
+  * 页面顺序（K1 单击循环）：信息 -> 状态 -> 时间 -> 灯控 -> 图片 -> 音乐
   *
   * 按键约定（2026-10-06 重构后）
-  *   K1 单击：**永远切页**（信息 → 状态 → 时钟 → 图片 → 循环；时间设置中＝保存并退出后再切页）
-  *   K1 长按：**只在状态页**＝切模式（常态 → 光控 → 热控），并响 1/2/3 声；时间设置中＝退出设置；其它页不动作
+  *   K1 单击：**永远切页**（时间设置中＝保存并退出后再切页；离开音乐页＝歌自动暂停）
+  *   K1 长按：**只在状态页**＝切模式（常态 -> 光控 -> 热控），并响 1/2/3 声；时间设置中＝退出设置；其它页不动作
   *   K1 双击：不使用
-  *   K2 / K3：**只跟当前页面有关**（与模式解耦尚未完成的那部分除外）——
-  *     信息页：无动作；时钟页：K3 长按＝进时间设置
+  *   K2 / K3：**只跟当前页面有关**——
+  *     信息页：无动作
+  *     状态页：K2 单击＝切参数（THR->MID->HIGH）、K2 长按＝+1、K3 长按＝-1、K3 单击＝恢复默认
+  *     时间页：K3 长按＝进时间设置
+  *     灯控页：K2 单击＝选下一颗灯、K2 长按＝全亮⇄全灭；
+  *             K3 单击＝呼吸⇄常亮、K3 长按＝流水灯开/关
   *     图片页：K2/K3 单击＝上一张/下一张动图，长按＝变慢/变快
-  *     手动模式（非图片页）：K2 单击＝选下一颗灯、K2 双击＝流水灯开关、K2 长按＝全亮⇄全灭；
-  *                       K3 单击＝呼吸⇄常亮、K3 双击＝阈值恢复默认
-  *     光控 / 热控模式：K2/K3 调阈值（**这块还没重构**，仍与模式耦合，待"状态页三参数"落地）
+  *     音乐页：K2 单击＝播放/暂停（暂停后从当前音符继续）、K3 单击＝切歌（停到待播）
+  *   （光控 / 热控模式下，灯控页的手动键不响应——灯由传感器控制）
   *
   * 时间设置里：
-  *   K2 单击 = 六个单位循环（年→月→日→时→分→秒→年）；
-  *   K2 长按 = 当前单位 −1、K3 长按 = 当前单位 +1（长按连调），**每改一次立即写回 RTC**；
+  *   K2 单击 = 六个单位循环（年->月->日->时->分->秒->年）；
+  *   K2 长按 = 当前单位 -1、K3 长按 = 当前单位 +1（长按连调），**每改一次立即写回 RTC**；
   *   K1 单击 / 长按 = 退出设置（单击同时切页）。进设置时置 k3_swallow：**松手前吞掉 K3 事件**，
   *   避免"长按进设置、手没松就把时间改了"。
   *
   * 光控 / 热控都是"三档渐进"（同一个套路）：
-  *   光控：越暗亮的颗数越多（1→2→3 颗，呼吸状态）
-  *   热控：越热亮的颗数越多（1→2→3 颗，闪烁状态）
+  *   光控：越暗亮的颗数越多（1->2->3 颗，呼吸状态）
+  *   热控：越热亮的颗数越多（1->2->3 颗，闪烁状态）
   ******************************************************************************
   */
 
@@ -35,6 +40,7 @@
 #include "bsp_adc.h"
 #include "bsp_rtc.h"
 #include "bsp_beep.h"          /* 板载蜂鸣器（PB1 / TIM3_CH4）：开机提示音 + 按键音 */
+#include "app_songs.h"         /* 曲库 + 共用播放器（音乐页） */
 #include "oled_gif.h"          /* 动图（Tools/make_gif.py 生成） */
 
 #include <stdarg.h>
@@ -42,8 +48,8 @@
 
 /* ------------------------------- 状态 ------------------------------- */
 /* 画面顺序（也是 K1 短按的循环顺序 + 上电默认停在第一页）
-   0 信息页（班级+姓名+日期时间）→ 1 参数/状态页（THR/MID/HIGH）→ 2 时钟页（只显示时间）→ 3 图片页（动图） */
-typedef enum { SCR_INFO = 0, SCR_STATUS, SCR_CLOCK, SCR_IMAGE, SCR_NUM } ScreenId;
+   0 信息页 → 1 状态页（THR/MID/HIGH）→ 2 时间页 → 3 灯控页 → 4 图片页 → 5 音乐页（曲库） */
+typedef enum { SCR_INFO = 0, SCR_STATUS, SCR_CLOCK, SCR_LAMP, SCR_IMAGE, SCR_MUSIC, SCR_NUM } ScreenId;
 typedef enum { MODE_NORMAL = 0, MODE_LIGHT, MODE_THERMAL, MODE_NUM } WorkMode;
 enum { TU_YEAR = 0, TU_MONTH, TU_DAY, TU_HOUR, TU_MIN, TU_SEC, TU_NUM };
 
@@ -460,6 +466,71 @@ static void draw_status(void)
     show_line_center(3U, buf);
 }
 
+/* 灯控页（2026-10-06 新增）：手动控灯都集中到这一页（原来散在信息页/时钟页）。
+   第 4 行：常态模式显示键位提示；光控/热控显示模式名（此时手动键不响应，灯由传感器控制）。 */
+static void draw_lamp(void)
+{
+    char buf[20];
+
+    (void)snprintf(buf, sizeof(buf), "LAMP  LED %u/%u",
+                   (unsigned)(lamp_sel + 1U), (unsigned)LED_NUM);
+    show_line_center(0U, buf);
+
+    (void)snprintf(buf, sizeof(buf), "ALL:%s FLOW:%s",
+                   lamp_all ? "ON" : "OFF", lamp_flow ? "ON" : "OFF");
+    show_line_center(1U, buf);
+
+    (void)snprintf(buf, sizeof(buf), "BREATH:%s", lamp_breath ? "ON" : "OFF");
+    show_line_center(2U, buf);
+
+    if (mode == MODE_NORMAL)
+    {
+        show_line_center(3U, "K2:SEL K3:BRTH");
+    }
+    else
+    {
+        (void)snprintf(buf, sizeof(buf), "MODE %s", mode_name());
+        show_line_center(3U, buf);
+    }
+}
+
+/* 音乐页（2026-10-06 新增）：曲库播放（数据与播放器在 App/Src/app_songs.c）。
+   K2 单击＝播放/暂停（暂停后从当前音符继续）、K3 单击＝切歌（停到待播）；
+   离开这一页歌自动暂停（K1 切页时处理，见 handle_keys）。 */
+static void draw_music(void)
+{
+    char        buf[20];
+    const char *st;
+
+    (void)snprintf(buf, sizeof(buf), "SONG %u/%u",
+                   (unsigned)(Songs_Index() + 1U), (unsigned)g_song_num);
+    show_line_center(0U, buf);
+
+    show_line_center(1U, Songs_Name());          /* 曲名居中 */
+
+    if (Songs_IsPlaying())
+    {
+        st = "PLAY";
+    }
+    else if (Songs_Pos() >= Songs_Len())
+    {
+        st = "DONE";                             /* 播完了：按 K2 从头再来 */
+    }
+    else if (Songs_Pos() > 0U)
+    {
+        st = "PAUSE";
+    }
+    else
+    {
+        st = "READY";
+    }
+    (void)snprintf(buf, sizeof(buf), "%-5s %2u/%2u",
+                   st, (unsigned)Songs_Pos(), (unsigned)Songs_Len());
+    show_line_center(2U, buf);
+
+    show_line_center(3U, Songs_IsPlaying() ? "K2 PAUSE K3 NEXT" : "K2 PLAY  K3 NEXT");
+}
+
 /* 信息页：前三行是学生字库里的中文（生成时用 | 分隔），第 4 行显示"日期 + 时间" */
 static void draw_info(void)
 {
@@ -499,6 +570,8 @@ static void screen_draw(void)
         {
             case SCR_CLOCK:  draw_clock();  break;
             case SCR_STATUS: draw_status(); break;
+            case SCR_LAMP:   draw_lamp();   break;
+            case SCR_MUSIC:  draw_music();  break;
             case SCR_INFO:   draw_info();   break;
             default: break;
         }
@@ -544,6 +617,10 @@ static void handle_keys(void)
         {
             time_set = 0U;                      /* K1 一动就退出设置 */
             BSP_UART_Printf("[time] exit set (K1 click)\r\n");
+        }
+        if ((screen == SCR_MUSIC) && (Songs_IsPlaying() != 0U))
+        {
+            Songs_Pause();                      /* 离开音乐页：歌暂停（位置保留，回来按 K2 继续） */
         }
         screen = (ScreenId)((screen + 1U) % (uint8_t)SCR_NUM);
         if (oled_ok) OLED_Clear(&g_oled);
@@ -632,63 +709,86 @@ static void handle_keys(void)
         return;
     }
 
-    /* ---------- 时钟页 K3 长按：进时间设置（任何模式下都能进） ---------- */
-    if (e3 == BSP_KEY_EVENT_LONG)
+    /* ---------- 时间页：K3 长按＝进时间设置（任何模式下都能进）；其它键不动作 ---------- */
+    if (screen == SCR_CLOCK)
     {
-        screen     = SCR_CLOCK;
-        time_set   = 1U;
-        time_unit  = TU_HOUR;
-        k3_swallow = 1U;                 /* 松手前吞掉 K3 的后续事件 */
-        rtc_load();
-        if (oled_ok) OLED_Clear(&g_oled);
-        BSP_UART_Printf("[time] enter set (K3 hold)\r\n");
+        if (e3 == BSP_KEY_EVENT_LONG)
+        {
+            time_set   = 1U;
+            time_unit  = TU_HOUR;
+            k3_swallow = 1U;             /* 松手前吞掉 K3 的后续事件 */
+            rtc_load();
+            if (oled_ok) OLED_Clear(&g_oled);
+            BSP_UART_Printf("[time] enter set (K3 hold)\r\n");
+        }
         return;
     }
 
-    /* ---------- 手动灯控（信息页/时钟页）：只在常态模式下生效 ----------
-       光控/热控模式下灯由传感器控制，这些键不响应；想手动控灯先按 K1 长按切回常态。
-       阈值的调整已挪到上面的"参数/状态页"分支，跟模式脱钩。 */
-    if (mode != MODE_NORMAL)
+    /* ---------- 灯控页：手动控灯集中在这一页（原来散在信息页/时钟页） ----------
+       K2 单击＝选下一颗灯、K2 长按＝全亮⇄全灭；K3 单击＝呼吸⇄常亮、K3 长按＝流水灯开/关。
+       光控/热控模式下灯由传感器控制，手动键不响应。 */
+    if (screen == SCR_LAMP)
     {
-        BSP_UART_Printf("[lamp] manual keys ignored in %s mode\r\n", mode_name());
+        if (mode != MODE_NORMAL)
+        {
+            BSP_UART_Printf("[lamp] manual keys ignored in %s mode\r\n", mode_name());
+            return;
+        }
+
+        if (e2 == BSP_KEY_EVENT_CLICK)                 /* 选下一颗灯 */
+        {
+            lamp_flow = 0U;
+            lamp_all  = 0U;
+            if (lamp_on) lamp_sel = (uint8_t)((lamp_sel + 1U) % LED_NUM);
+            else         { lamp_sel = 0U; lamp_on = 1U; }
+            BSP_UART_Printf("[lamp] -> LED%d\r\n", lamp_sel + 1);
+        }
+        if (e2 == BSP_KEY_EVENT_LONG)                  /* 全亮 ⇄ 全灭（同一个键切换） */
+        {
+            lamp_flow = 0U;
+            if (lamp_all)
+            {
+                lamp_all = 0U;
+                lamp_on  = 0U;
+                BSP_UART_Printf("[lamp] ALL OFF\r\n");
+            }
+            else
+            {
+                lamp_all = 1U;
+                lamp_on  = 1U;
+                BSP_UART_Printf("[lamp] ALL ON\r\n");
+            }
+        }
+        if (e3 == BSP_KEY_EVENT_CLICK)                 /* 呼吸 ⇄ 常亮 */
+        {
+            lamp_breath = (uint8_t)(!lamp_breath);
+            BSP_UART_Printf("[lamp] breath %s\r\n", lamp_breath ? "ON" : "OFF");
+        }
+        if (e3 == BSP_KEY_EVENT_LONG)                  /* 流水灯开/关（2026-10-06 从 K2 双击挪来） */
+        {
+            lamp_flow = (uint8_t)(!lamp_flow);
+            BSP_UART_Printf("[lamp] flow %s\r\n", lamp_flow ? "ON" : "OFF");
+        }
         return;
     }
 
-    /* ---------- 手动模式：灯 ---------- */
-    if (e2 == BSP_KEY_EVENT_CLICK)                 /* 选下一颗灯 */
+    /* ---------- 音乐页：K2 单击＝播放/暂停、K3 单击＝切歌 ----------
+       暂停后按 K2 从当前音符继续；播完/待播状态按 K2 从头播。离开这一页时（K1）自动暂停。 */
+    if (screen == SCR_MUSIC)
     {
-        lamp_flow = 0U;
-        lamp_all  = 0U;
-        if (lamp_on) lamp_sel = (uint8_t)((lamp_sel + 1U) % LED_NUM);
-        else         { lamp_sel = 0U; lamp_on = 1U; }
-        BSP_UART_Printf("[lamp] -> LED%d\r\n", lamp_sel + 1);
-    }
-    if (e2 == BSP_KEY_EVENT_LONG)                  /* 全亮 ⇄ 全灭（同一个键切换） */
-    {
-        lamp_flow = 0U;
-        if (lamp_all)
+        if (e2 == BSP_KEY_EVENT_CLICK)
         {
-            lamp_all = 0U;
-            lamp_on  = 0U;
-            BSP_UART_Printf("[lamp] ALL OFF\r\n");
+            if (Songs_IsPlaying() != 0U) Songs_Pause();
+            else                         Songs_Resume();
         }
-        else
+        if (e3 == BSP_KEY_EVENT_CLICK)
         {
-            lamp_all = 1U;
-            lamp_on  = 1U;
-            BSP_UART_Printf("[lamp] ALL ON\r\n");
+            Songs_Next();
         }
+        return;
     }
-    if (e2 == BSP_KEY_EVENT_DOUBLE)                /* 流水灯开关 */
-    {
-        lamp_flow = (uint8_t)(!lamp_flow);
-        BSP_UART_Printf("[lamp] flow %s\r\n", lamp_flow ? "ON" : "OFF");
-    }
-    if (e3 == BSP_KEY_EVENT_CLICK)                 /* 呼吸⇄常亮 */
-    {
-        lamp_breath = (uint8_t)(!lamp_breath);
-        BSP_UART_Printf("[lamp] breath %s\r\n", lamp_breath ? "ON" : "OFF");
-    }
+
+    /* ---------- 信息页：纯展示，无 K2/K3 动作 ---------- */
 }
 
 /* ------------------------------ 入口 ------------------------------ */
@@ -723,7 +823,8 @@ void APP_Demo_Init(void)
                         OLED_ANIMS[i].delay_ms,
                         ((OLED_ANIMS[i].w + 7) / 8) * OLED_ANIMS[i].h * OLED_ANIMS[i].count);
     }
-    BSP_UART_Printf("[tips] K1 click=next page, hold(only on STATUS)=mode 1/2/3 beeps | time set: K2 hold=- K3 hold=+ K1=exit | lock removed\r\n");
+    BSP_UART_Printf("[tips] 6 pages INFO>STATUS>CLOCK>LAMP>IMAGE>MUSIC; K1 click=next, K1 hold on STATUS=mode(1/2/3 beeps)\r\n");
+    BSP_UART_Printf("[tips] STATUS: K2 sel/K2H+/K3H-/K3 reset | CLOCK: K3H=set | LAMP: K2 sel+ALL/K3 breath+flow | MUSIC: K2 play-pause/K3 next (%u songs)\r\n", (unsigned)g_song_num);
 
     lamp_sel = 0U; lamp_all = 0U; lamp_on = 0U; lamp_breath = 0U; lamp_flow = 0U;
     screen = SCR_INFO; mode = MODE_NORMAL; time_set = 0U; k3_swallow = 0U; thr_sel = 0U;
@@ -751,6 +852,7 @@ void APP_Demo_Process(void)
 
     BSP_BEEP_Task();           /* 提示音到点自动停（不阻塞） */
     mode_beep_task();          /* 切模式的 1/2/3 声提示音 */
+    Songs_Task();              /* 音乐页曲库：上一个音放完推下一个（离开页时已暂停） */
     handle_keys();
     lamp_update();
 
