@@ -186,3 +186,17 @@ void BSP_OLED_DrawTextInverse(int16_t baseline_y, const char *text)
     OLED_SetBrush(&g_oled, BRUSH_BLACK);
     OLED_SetFont(&g_oled, keep);
 }
+
+void BSP_OLED_DrawTextInverseAt(int16_t x, int16_t baseline_y, const char *text)
+{
+    /* 与 BSP_OLED_DrawTextInverse 相同（白底黑字、光带只包文字），但**不居中**：
+       由调用者指定起始列 x——时间页用它只反白"选中的那两个数字"。 */
+    OLED_SetCursor(&g_oled, x, baseline_y);
+    OLED_SetPen(&g_oled, PEN_COLOR_BLACK, 1);
+    OLED_SetBrush(&g_oled, BRUSH_WHITE);
+    OLED_DrawString(&g_oled, text);
+
+    /* 恢复默认：白笔 + 黑刷（不恢复的话后面所有文字都会跟着反白） */
+    OLED_SetPen(&g_oled, PEN_COLOR_WHITE, 1);
+    OLED_SetBrush(&g_oled, BRUSH_BLACK);
+}

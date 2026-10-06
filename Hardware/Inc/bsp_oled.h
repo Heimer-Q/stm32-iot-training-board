@@ -46,4 +46,8 @@ void BSP_OLED_ShowUserLineWithText(uint8_t idx, const char *tail, int16_t baseli
    @参数：baseline_y - 这一行的基线 Y（16 像素一行时，第 n 行填 n*16+16） */
 void BSP_OLED_DrawTextInverse(int16_t baseline_y, const char *text);
 
+/* 同上，但不居中：由调用者指定起始列 x（时间页用它只反白选中的 2 个数字）。
+   @参数：x - 起始列；baseline_y - 这一行的基线 Y */
+void BSP_OLED_DrawTextInverseAt(int16_t x, int16_t baseline_y, const char *text);
+
 #endif /* __BSP_OLED_H */

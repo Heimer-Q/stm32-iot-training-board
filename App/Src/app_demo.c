@@ -86,23 +86,6 @@ static uint16_t line_h = 16U;
 static uint8_t  oled_ok;
 
 /* ------------------------------ 小工具 ------------------------------ */
-static void show_line(uint8_t row, const char *text)
-{
-    OLED_SetCursor(&g_oled, 0, (int16_t)((row + 1U) * line_h));
-    OLED_DrawString(&g_oled, text);
-}
-
-static void line_printf(uint8_t row, const char *fmt, ...)
-{
-    va_list ap;
-    char    buf[24];
-
-    va_start(ap, fmt);
-    (void)vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    show_line(row, buf);
-}
-
 /* 居中的一行（信息页用：按当前字体实际宽度算 x） */
 static void show_line_center(uint8_t row, const char *text)
 {
@@ -110,6 +93,29 @@ static void show_line_center(uint8_t row, const char *text)
 
     OLED_SetCursor(&g_oled, (int16_t)((128 - (int16_t)w) / 2), (int16_t)((row + 1U) * line_h));
     OLED_DrawString(&g_oled, text);
+}
+
+/* 画一行居中文字；sel_idx >= 0 时把从第 sel_idx 个字符起的 2 字符反白（白底黑字）。
+   时间页专用：日期串的年/月/日和钟串的时/分/秒都是 2 字符，正好整段反白。 */
+static void show_line_center_hl(uint8_t row, const char *text, int8_t sel_idx)
+{
+    int16_t  y = (int16_t)((row + 1U) * line_h);
+    uint16_t w = OLED_GetStrWidth(&g_oled, text);
+    int16_t  x = (int16_t)((128 - (int16_t)w) / 2);
+    char     seg[3];
+
+    OLED_SetCursor(&g_oled, x, y);
+    OLED_DrawString(&g_oled, text);          /* 整行先正常画 */
+
+    if (sel_idx < 0)
+    {
+        return;
+    }
+
+    seg[0] = text[sel_idx];
+    seg[1] = text[sel_idx + 1];
+    seg[2] = '\0';
+    BSP_OLED_DrawTextInverseAt((int16_t)(x + (int16_t)sel_idx * 8), y, seg);   /* 选中的 2 字符反白 */
 }
 
 /* 呼吸：0→100→0，周期 CFG_BREATH_PERIOD_MS */
@@ -386,33 +392,41 @@ static void time_step(int32_t delta)
 }
 
 /* ------------------------------ 画面 ------------------------------ */
+/* 时间页（2026-10-06 晚改版）：
+   平时＝日期行 + 时间行（都居中）；设置中＝选中单位"白底黑字"反白，
+   第 1、4 行放键位提示（K2 换单位 / K1 退出 / 长按 K2- K3+ 加减）。 */
 static void draw_clock(void)
 {
+    char   dbuf[12];
+    char   tbuf[12];
+    int8_t dsel = -1;               /* 日期行反白起点（字符索引），-1 = 不反白 */
+    int8_t tsel = -1;
+
+    if (!time_set)
+    {
+        rtc_load();                 /* 平时显示实时时间（设置中显示编辑中的影子值） */
+    }
+
+    (void)snprintf(dbuf, sizeof(dbuf), "%02d-%02d-%02d", t_year, t_month, t_day);
+    (void)snprintf(tbuf, sizeof(tbuf), "%02d:%02d:%02d", t_hour, t_min, t_sec);
+
     if (time_set)
     {
-        /* 编辑中：把当前单位用 [ ] 括起来 */
-        line_printf(0, "SET %s", unit_name());
+        show_line_center(0U, "K2:UNIT K1:EXIT");
+        show_line_center(3U, "HOLD K2- K3+");
         switch (time_unit)
         {
-            case TU_YEAR:  line_printf(1, "[%02d]-%02d-%02d", t_year, t_month, t_day);      break;
-            case TU_MONTH: line_printf(1, "%02d-[%02d]-%02d", t_year, t_month, t_day);      break;
-            case TU_DAY:   line_printf(1, "%02d-%02d-[%02d]", t_year, t_month, t_day);      break;
-            case TU_HOUR:  line_printf(1, "[%02d]:%02d:%02d", t_hour, t_min, t_sec);        break;
-            case TU_MIN:   line_printf(1, "%02d:[%02d]:%02d", t_hour, t_min, t_sec);        break;
-            default:       line_printf(1, "%02d:%02d:[%02d]", t_hour, t_min, t_sec);        break;
+            case TU_YEAR:  dsel = 0; break;
+            case TU_MONTH: dsel = 3; break;
+            case TU_DAY:   dsel = 6; break;
+            case TU_HOUR:  tsel = 0; break;
+            case TU_MIN:   tsel = 3; break;
+            default:       tsel = 6; break;
         }
-        line_printf(2, "K2 UNIT K2+ K3-");
-        show_line(3, "K1 EXIT");
     }
-    else
-    {
-        char buf[12];
 
-        /* 普通模式：这一页只显示时间（2026-10-06 会长要求，日期/光照/温度都不在这页） */
-        rtc_load();
-        (void)snprintf(buf, sizeof(buf), "%02d:%02d:%02d", t_hour, t_min, t_sec);
-        show_line_center(1U, buf);
-    }
+    show_line_center_hl(1U, dbuf, dsel);
+    show_line_center_hl(2U, tbuf, tsel);
 }
 
 static void draw_image(void)
