@@ -70,6 +70,8 @@ static uint8_t t_year, t_month, t_day, t_hour, t_min, t_sec;
 /* 统计与节拍 */
 static uint32_t boot_ms;
 static uint16_t ev_click, ev_long, ev_dbl;
+static uint8_t  beep_left;              /* 切模式还要响几声 */
+static uint32_t beep_next_ms;           /* 下一声最早什么时候响 */
 static uint32_t t_adc, t_draw, t_beat;
 static uint16_t line_h = 16U;
 static uint8_t  oled_ok;
@@ -181,6 +183,26 @@ static uint8_t temp_band_count(void)
     if (raw >= hi - span * 2U / 3U) return 2U;
     return 3U;
 #endif
+}
+
+/* --------------------------- 模式提示音（非阻塞） ---------------------------
+   切模式后响 N 声：常态 1 声、光控 2 声、热敏 3 声。
+   只发一声、隔 200ms 再发下一声，靠 BSP_BEEP_Task() 收尾，不占用主循环。 */
+static void mode_beep_start(void)
+{
+    beep_left    = (uint8_t)((uint8_t)mode + 1U);
+    beep_next_ms = HAL_GetTick();
+}
+
+static void mode_beep_task(void)
+{
+    if ((beep_left == 0U) || (HAL_GetTick() < beep_next_ms) || BSP_BEEP_IsBusy())
+    {
+        return;
+    }
+    BSP_BEEP_Beep(80U);                     /* 80ms 一声（默认音调） */
+    beep_left--;
+    beep_next_ms = HAL_GetTick() + 200U;    /* 声与声之间隔 200ms，听得清 */
 }
 
 /* ------------------------------ 灯的输出 ------------------------------ */
@@ -467,8 +489,16 @@ static void handle_keys(void)
             time_set = 0U;                      /* K1 一动就退出设置 */
             BSP_UART_Printf("[time] exit set (K1 hold)\r\n");
         }
-        mode = (WorkMode)((mode + 1U) % (uint8_t)MODE_NUM);
-        BSP_UART_Printf("[mode] -> %s\r\n", mode_name());
+        else if (screen == SCR_STATUS)          /* 只有状态页能切模式：音乐页/其它页不响提示音，避免抢蜂鸣器 */
+        {
+            mode = (WorkMode)((mode + 1U) % (uint8_t)MODE_NUM);
+            BSP_UART_Printf("[mode] -> %s\r\n", mode_name());
+            mode_beep_start();                  /* 常态 1 声 / 光控 2 声 / 热敏 3 声 */
+        }
+        else
+        {
+            BSP_UART_Printf("[ui  ] mode switch only on STATUS page\r\n");
+        }
         break;
     default:                                    /* 双击暂时不用 */
         break;
@@ -670,6 +700,7 @@ void APP_Demo_Process(void)
     uint32_t now = HAL_GetTick();
 
     BSP_BEEP_Task();           /* 提示音到点自动停（不阻塞） */
+    mode_beep_task();          /* 切模式的 1/2/3 声提示音 */
     handle_keys();
     lamp_update();
 
