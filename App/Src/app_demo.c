@@ -126,21 +126,6 @@ static const char *mode_name(void)
     }
 }
 
-/* 从 __DATE__（形如 "Sep 26 2026"）里取出月份数字 */
-static uint8_t month_num(const char *m)
-{
-    static const char names[12][4] = {"Jan","Feb","Mar","Apr","May","Jun",
-                                      "Jul","Aug","Sep","Oct","Nov","Dec"};
-    for (uint8_t i = 0U; i < 12U; i++)
-    {
-        if ((m[0] == names[i][0]) && (m[1] == names[i][1]) && (m[2] == names[i][2]))
-        {
-            return (uint8_t)(i + 1U);
-        }
-    }
-    return 1U;
-}
-
 static const char *unit_name(void)
 {
     static const char *n[TU_NUM] = {"YEAR", "MONTH", "DAY", "HOUR", "MIN", "SEC"};
@@ -408,11 +393,11 @@ static void draw_status(void)
                 (unsigned)temp_percent(), (unsigned)raw_to_pct(temp_mid), temp_band_count());
 }
 
-/* 信息页：前两行是学生字库里的中文（生成时用 | 分隔），下面两行放协会/固件信息 */
+/* 信息页：前三行是学生字库里的中文（生成时用 | 分隔），第 4 行显示实时时间 */
 static void draw_info(void)
 {
-    uint8_t day = (uint8_t)(((( __DATE__[4] == ' ') ? 0 : (__DATE__[4] - '0')) * 10)
-                            + (__DATE__[5] - '0'));
+    uint8_t h, m, s;
+    char buf[12];
 
     /* 四行全部水平居中 */
     BSP_OLED_ShowUserLineCenter(0U, (int16_t)(1U * line_h));   /* 例如 哲学本263   */
@@ -424,11 +409,11 @@ static void draw_info(void)
     }
     else
     {
-        char buf[20];
         BSP_OLED_ShowUserLineCenter(2U, (int16_t)(3U * line_h));   /* 例如 物联网协会 */
-        /* VER = version，版本日期（编译时刻） */
-        (void)snprintf(buf, sizeof(buf), "VER 20%c%c-%02d-%02d",
-                       __DATE__[9], __DATE__[10], month_num(__DATE__), day);
+
+        /* 第 4 行：实时时间（RTC 时:分:秒，秒在跳；板子无纽扣电池，上电按编译时刻校一次） */
+        BSP_RTC_Get(&h, &m, &s);
+        (void)snprintf(buf, sizeof(buf), "%02d:%02d:%02d", h, m, s);
         show_line_center(3U, buf);
     }
 }
