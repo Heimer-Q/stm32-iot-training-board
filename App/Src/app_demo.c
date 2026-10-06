@@ -744,10 +744,12 @@ static void handle_keys(void)
        光控/热控模式下灯由传感器控制，手动键不响应。 */
     if (screen == SCR_LAMP)
     {
+        /* 灯控页＝手动控灯：如果当前在光控/热控，先自动切回常态，
+           免得按键"没反应"（2026-10-06 会长实测反馈） */
         if (mode != MODE_NORMAL)
         {
-            BSP_UART_Printf("[lamp] manual keys ignored in %s mode\r\n", mode_name());
-            return;
+            BSP_UART_Printf("[lamp] auto back to NORMAL (was %s)\r\n", mode_name());
+            mode = MODE_NORMAL;
         }
 
         if (e2 == BSP_KEY_EVENT_CLICK)                 /* 选下一颗灯 */
@@ -776,6 +778,11 @@ static void handle_keys(void)
         }
         if (e3 == BSP_KEY_EVENT_CLICK)                 /* 呼吸 ⇄ 常亮 */
         {
+            if ((lamp_on == 0U) && (lamp_all == 0U))   /* 灯全灭时先点亮一盏：任何按键都有反馈 */
+            {
+                lamp_sel = 0U;
+                lamp_on  = 1U;
+            }
             lamp_breath = (uint8_t)(!lamp_breath);
             BSP_UART_Printf("[lamp] breath %s\r\n", lamp_breath ? "ON" : "OFF");
         }
