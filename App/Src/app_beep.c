@@ -1,7 +1,7 @@
 /**
   ******************************************************************************
   * @file    app_beep.c
-  * @brief   09 蜂鸣器例程：三个键发单音 + 曲库播放（曲库数据在 App/Src/app_songs.c）
+  * @brief   06 蜂鸣器例程：三个键发单音 + 曲库播放（曲库数据在 App/Src/app_songs.c）
   *
   * 按键：
   *   K1 / K2 / K3 单击：发一个单音（音高与长短见下面三行常量）
@@ -27,7 +27,7 @@ void APP_Beep_Init(void)
     BSP_KEY_Init();
     BSP_UART_Init();
 
-    BSP_UART_Printf("\r\n=== 09 BEEP DEMO ===\r\n");
+    BSP_UART_Printf("\r\n=== 06 BEEP DEMO ===\r\n");
     BSP_UART_Printf("[song] %u songs in library, first = %s\r\n",
                     (unsigned)g_song_num, g_songs[0].name);
     BSP_UART_Printf("[tips] K1 hold=play  K2 hold=next  K3 hold=stop\r\n");

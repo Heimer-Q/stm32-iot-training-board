@@ -30,7 +30,7 @@ extern const Song    g_songs[];
 extern const uint8_t g_song_num;
 
 /* ---- 共用播放器（非阻塞：主循环里调 Songs_Task()）----
-   09 蜂鸣器例程和 99 全功能的音乐页都用这一套，别再各写一份。 */
+   06 蜂鸣器例程和 99 全功能的音乐页都用这一套，别再各写一份。 */
 void        Songs_Play(uint8_t idx);        /* 从第 idx 首的开头开始播 */
 void        Songs_Next(void);               /* 切到下一首并停在待播（不自动播） */
 void        Songs_Stop(void);               /* 停止并回到开头 */
