@@ -41,4 +41,9 @@ void BSP_OLED_ShowUserLineCenter(uint8_t idx, int16_t baseline_y);
    例：BSP_OLED_ShowUserLineWithText(3, " 2026-09-26", y) → 显示 "固件 2026-09-26" */
 void BSP_OLED_ShowUserLineWithText(uint8_t idx, const char *tail, int16_t baseline_y);
 
+/* 反白一行文字（白底黑字）：光带只包住文字本身、水平居中——用来标"当前选中的那一项"。
+   实现＝把默认的"白笔+黑刷"反过来（黑笔熄字形 + 白刷填字格），内部自动恢复默认画笔/画刷。
+   @参数：baseline_y - 这一行的基线 Y（16 像素一行时，第 n 行填 n*16+16） */
+void BSP_OLED_DrawTextInverse(int16_t baseline_y, const char *text);
+
 #endif /* __BSP_OLED_H */

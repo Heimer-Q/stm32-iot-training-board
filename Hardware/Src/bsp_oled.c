@@ -167,3 +167,22 @@ void BSP_OLED_ShowUserLineWithText(uint8_t idx, const char *tail, int16_t baseli
 
     OLED_SetFont(&g_oled, keep);
 }
+
+void BSP_OLED_DrawTextInverse(int16_t baseline_y, const char *text)
+{
+    const Font_TypeDef *keep = g_oled.Font;
+    uint16_t w = OLED_GetStrWidth(&g_oled, text);
+    int16_t  x = (int16_t)((128 - (int16_t)w) / 2);
+
+    /* 反白＝把默认的"白笔 + 黑刷"反过来：
+       黑笔把字形像素熄灭，白刷把每个字格填白 → 白底黑字，且光带只包住文字本身 */
+    OLED_SetCursor(&g_oled, x, baseline_y);
+    OLED_SetPen(&g_oled, PEN_COLOR_BLACK, 1);
+    OLED_SetBrush(&g_oled, BRUSH_WHITE);
+    OLED_DrawString(&g_oled, text);
+
+    /* 恢复默认：白笔 + 黑刷（不恢复的话，后面所有文字都会跟着反白） */
+    OLED_SetPen(&g_oled, PEN_COLOR_WHITE, 1);
+    OLED_SetBrush(&g_oled, BRUSH_BLACK);
+    OLED_SetFont(&g_oled, keep);
+}
