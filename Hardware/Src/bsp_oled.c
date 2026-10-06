@@ -1,3 +1,26 @@
+/**
+  ******************************************************************************
+  * @file    bsp_oled.c
+  * @brief   OLED 屏（0.96 寸 I2C）绑定层：把通用驱动接到这块板的 I2C1 上
+  *
+  * == 新人导读 ================================================================
+  * 1. 分工：Hardware/Src/oled.c 是"通用驱动"（铁头山羊的，负责画点/画字/刷屏），
+  *    本文件是"绑定层"——只干三件事：
+  *      ① 告诉驱动"I2C 数据往哪发"（跑在这块板的 I2C1 上，地址 0x3C）；
+  *      ② 初始化 + 把画笔/画刷设成正确的默认值；
+  *      ③ 提供几个"显示学生名字"和"反白"的小工具。
+  *
+  * 2. 什么叫"画笔/画刷"？
+  *    驱动把屏幕当成一张 128×64 的黑白画布：
+  *      画笔（Pen）画字形的"笔画"；画刷（Brush）填字格的"背景"。
+  *    默认是"白笔 + 黑刷"= 黑底白字；把两者反过来（黑笔 + 白刷）就得到
+  *    "白底黑字"的选中效果——时间页/状态页的反白就是这么来的。
+  *
+  * 3. 显存是 malloc 出来的 1025 字节；若初始化失败返回 -2，先检查
+  *    MDK-ARM/startup_*.s 里的 Heap_Size 是否够 0x800。
+  ******************************************************************************
+  */
+
 #include "bsp_oled.h"
 
 /* 字体：8x16 英文由 oled.c 在初始化时设为默认；这里只带学生自己生成的那份。
@@ -28,6 +51,7 @@ static int OLED_I2C_Write(uint8_t addr, const uint8_t *pdata, uint16_t size)
     return (st == HAL_OK) ? 0 : -1;
 }
 
+/* 初始化：抬 I2C 到 400kHz → 调驱动初始化 → 设画笔/画刷 → 清屏并推一帧 */
 int BSP_OLED_Init(void)
 {
     OLED_InitTypeDef init;
@@ -53,7 +77,7 @@ int BSP_OLED_Init(void)
        - PenColor   = WHITE(点亮)：负责画字的"笔画"；
        - Brush      = BLACK(熄灭)：负责字格背景，也就是把上一次的字擦掉；
        - Brush 用 WHITE 会把整个字格点亮 → 满屏白块（花屏）；
-       - Brush 用 TRANSPARENT（驱动默认）不擦旧像素 → 数字叠在一起。 */
+       - Brush 用 TRANSPARENT 不擦旧像素 → 数字叠在一起。 */
     OLED_SetPen(&g_oled, PEN_COLOR_WHITE, 1);
     OLED_SetBrush(&g_oled, BRUSH_BLACK);
 
@@ -70,16 +94,20 @@ int BSP_OLED_Init(void)
     return 0;
 }
 
+/* 上次初始化/刷屏的错误码（0 = 正常；-1 = I2C 通信失败；-2 = 堆不够） */
 int BSP_OLED_LastError(void)
 {
     return s_last_error;
 }
 
+/* 把显存推给屏幕：改完画面后调一次（整屏 1KB，约 23ms） */
 void BSP_OLED_Refresh(void)
 {
     (void)OLED_SendBuffer(&g_oled);
 }
 
+/* 显示学生字库里的固定文本（左对齐）。文本内容在 oled_font_user.h 里，
+   由 Tools/make_font.py 用"班级+姓名"生成 */
 void BSP_OLED_ShowUserText(int16_t x, int16_t baseline_y)
 {
     const Font_TypeDef *keep = g_oled.Font;
@@ -90,6 +118,7 @@ void BSP_OLED_ShowUserText(int16_t x, int16_t baseline_y)
     OLED_SetFont(&g_oled, keep);
 }
 
+/* 显示学生字库里的第 idx 行（0=USER_TEXT_1, 1=USER_TEXT_2, 2=USER_TEXT_3） */
 void BSP_OLED_ShowUserLine(uint8_t idx, int16_t x, int16_t baseline_y)
 {
     const Font_TypeDef *keep = g_oled.Font;
@@ -108,6 +137,7 @@ void BSP_OLED_ShowUserLine(uint8_t idx, int16_t x, int16_t baseline_y)
     OLED_SetFont(&g_oled, keep);
 }
 
+/* 同上，但水平居中（按中文字库的实际宽度算 x） */
 void BSP_OLED_ShowUserLineCenter(uint8_t idx, int16_t baseline_y)
 {
     const Font_TypeDef *keep = g_oled.Font;
@@ -128,6 +158,8 @@ void BSP_OLED_ShowUserLineCenter(uint8_t idx, int16_t baseline_y)
     OLED_SetFont(&g_oled, keep);
 }
 
+/* 中文标签 + 后面接一段英文/数字，整体居中
+   例：BSP_OLED_ShowUserLineWithText(3, " 2026-09-26", y) → 显示 "固件 2026-09-26" */
 void BSP_OLED_ShowUserLineWithText(uint8_t idx, const char *tail, int16_t baseline_y)
 {
     const Font_TypeDef *keep = g_oled.Font;
@@ -168,6 +200,8 @@ void BSP_OLED_ShowUserLineWithText(uint8_t idx, const char *tail, int16_t baseli
     OLED_SetFont(&g_oled, keep);
 }
 
+/* 反白一行文字（白底黑字、水平居中）：光带只包住文字本身——
+   用来标"当前选中"的那一项（状态页的 THR/MID/HIGH、时间页的单位） */
 void BSP_OLED_DrawTextInverse(int16_t baseline_y, const char *text)
 {
     const Font_TypeDef *keep = g_oled.Font;
@@ -187,10 +221,9 @@ void BSP_OLED_DrawTextInverse(int16_t baseline_y, const char *text)
     OLED_SetFont(&g_oled, keep);
 }
 
+/* 同上的"不居中版"：由调用者指定起始列 x——时间页用它只反白选中的那两个数字 */
 void BSP_OLED_DrawTextInverseAt(int16_t x, int16_t baseline_y, const char *text)
 {
-    /* 与 BSP_OLED_DrawTextInverse 相同（白底黑字、光带只包文字），但**不居中**：
-       由调用者指定起始列 x——时间页用它只反白"选中的那两个数字"。 */
     OLED_SetCursor(&g_oled, x, baseline_y);
     OLED_SetPen(&g_oled, PEN_COLOR_BLACK, 1);
     OLED_SetBrush(&g_oled, BRUSH_WHITE);
