@@ -6,7 +6,7 @@
   * == 它想回答一个问题：这块板子焊好了吗？ ==
   *
   *   ① 三颗 LED   每 500ms 轮流亮一颗（肉眼看灯）＋ 按住任意键时，对应那颗灯亮
-  *   ② OLED 屏幕  4 行：标题 / 灯号+三个键 / RTC 时间（秒在跳）/ 光照 + 温度
+  *   ② OLED 屏幕  4 行：标题 / 当前灯号 / 三个键的状态 / 光照 + 温度
   *   ③ 按键       直接读"现在按着没"（用驱动里已消抖的 BSP_KEY_IsPressed，
   *                不玩单击/双击/长按——自检要的是简单可信）
   *   ④ 光敏/热敏  每 500ms 采一次，原始码和百分比都打出来
@@ -169,16 +169,11 @@ void APP_HWCheck_Process(void)
         {
             OLED_Clear(&g_oled);
             show_line(0U, "== HW CHECK ==");
-            /* 第 2 行：灯 + 三个键（并成一行，给 RTC 腾位置） */
-            (void)snprintf(buf, sizeof(buf), "LED%u/3 KEY%u%u%u",
-                           (unsigned)(led_step + 1U), k1, k2, k3);
+            (void)snprintf(buf, sizeof(buf), "LED %u/3  %s", (unsigned)(led_step + 1U), "RUN");
             show_line(1U, buf);
-            /* 第 3 行：RTC 实时时间——秒每秒在跳，就说明 RTC 在走 */
-            (void)snprintf(buf, sizeof(buf), "RTC %02d:%02d:%02d", h, m, s);
+            (void)snprintf(buf, sizeof(buf), "KEY %u%u%u", k1, k2, k3);
             show_line(2U, buf);
-            /* 第 4 行：光照 / 温度 */
             (void)snprintf(buf, sizeof(buf), "L%3u%% T%3u%%", (unsigned)BSP_ADC_LightPercent(), (unsigned)raw_to_pct(raw_t));
-            show_line(3U, buf);
             show_line(3U, buf);
             BSP_OLED_Refresh();
         }
