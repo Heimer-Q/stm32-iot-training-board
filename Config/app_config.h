@@ -27,7 +27,7 @@
 #define DEMO_FINAL        99   /* 99 全功能：自检→对时→显示→光控灯→上报      */
 
 /* ★ 学生改这一行 ★ */
-#define DEMO_ID           DEMO_HWCHECK
+#define DEMO_ID           DEMO_FINAL
 
 /* ============================== 可调参数 ============================== */
 
