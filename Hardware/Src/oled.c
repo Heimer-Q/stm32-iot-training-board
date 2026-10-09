@@ -58,12 +58,22 @@ static uint16_t GetGlyphWidth(OLED_TypeDef *OLED, uint32_t Unicode);
 //         -1 - 数据发送失败
 //         -2 - 缓冲区分配失败
 //
+/* 显存缓冲区：128×64 屏按页寻址，一帧 = 128×8 = 1024 字节。
+   原来是 OLED_Init 里 malloc(1024+1) —— 堆不够（默认 512 B）就分配失败、屏幕全黑，
+   而且 CubeMX 重新生成会把启动文件的 Heap_Size 打回 0x200（2026-10-09 实测）。
+   改成本文件的静态数组后：链接期就分配好、永不失败，堆设多少都与屏幕无关。
+   占用不变——原来 malloc 的那 1025 字节从来没 free 过，一直是常驻。
+   （+1 与原实现一致：下面 pBuffer++ 之后从第 2 个字节开始用） */
+static uint8_t s_fb[OLED_SCREEN_COLS * OLED_SCREEN_PAGES + 1];
+
 int OLED_Init(OLED_TypeDef *OLED, OLED_InitTypeDef *OLED_InitStruct)
 {
 	OLED->i2c_write_cb = OLED_InitStruct->i2c_write_cb;
 	
 	// 给缓冲区分配空间
-	OLED->pBuffer = (uint8_t *)malloc(OLED_SCREEN_COLS * OLED_SCREEN_PAGES * sizeof(uint8_t) + 1);
+	/* 2026-10-09：显存改成静态数组（见文件里 s_fb 的定义）——不再经过堆，
+	   CubeMX 里 HeapSize 设成多少都不影响屏幕。 */
+	OLED->pBuffer = s_fb;
 	
 	if(OLED->pBuffer == 0)
 	{

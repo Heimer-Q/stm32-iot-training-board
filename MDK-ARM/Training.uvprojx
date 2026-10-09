@@ -605,6 +605,11 @@
               <FilePath>..\App\Src\app_beep.c</FilePath>
             </File>
             <File>
+              <FileName>app_hwcheck.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\App\Src\app_hwcheck.c</FilePath>
+            </File>
+            <File>
               <FileName>app_songs.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\App\Src\app_songs.c</FilePath>

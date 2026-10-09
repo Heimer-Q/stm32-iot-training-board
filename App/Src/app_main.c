@@ -4,7 +4,7 @@
   * @brief   例程总入口：根据 Config/app_config.h 里的 DEMO_ID 决定跑哪套程序
   *
   * == 新人导读 ================================================================
-  * 整个工程有 4 套例程：00 自检 / 01 灯效 / 06 蜂鸣器 / 99 全功能。
+  * 整个工程有 5 套例程：00 自检 / 01 灯效 / 03 最简自检 / 06 蜂鸣器 / 99 全功能。
   * 换例程只有一步：打开 Config/app_config.h，改 DEMO_ID 这一行，重新编译下载。
   *
   * 这个文件就是"换台开关"的接线处：它用 #if 在【编译阶段】选中一套例程，
@@ -19,6 +19,7 @@
 #include "app_main.h"
 #include "app_config.h"
 #include "app_selftest.h"
+#include "app_hwcheck.h"
 #include "app_light.h"
 #include "app_beep.h"
 #include "app_demo.h"
@@ -32,6 +33,8 @@ void APP_Main_Init(void)
     APP_Light_Init();
 #elif (DEMO_ID == DEMO_BEEP)
     APP_Beep_Init();              /* 06 蜂鸣器：按键发音 + 长按播《小星星》 */
+#elif (DEMO_ID == DEMO_HWCHECK)
+    APP_HWCheck_Init();           /* 03 最简自检：上电自动跑，不用按键 */
 #elif (DEMO_ID == DEMO_FINAL)
     APP_Demo_Init();              /* 99 全功能：六页面 + 三模式 + 时间设置 + 曲库音乐 */
 #else
@@ -51,6 +54,8 @@ void APP_Main_Process(void)
     APP_Light_Process();
 #elif (DEMO_ID == DEMO_BEEP)
     APP_Beep_Process();
+#elif (DEMO_ID == DEMO_HWCHECK)
+    APP_HWCheck_Process();
 #elif (DEMO_ID == DEMO_FINAL)
     APP_Demo_Process();
 #endif
