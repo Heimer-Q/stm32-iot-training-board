@@ -217,6 +217,21 @@ void Songs_Next(void)
                     (unsigned)(cur_idx + 1U), (unsigned)g_song_num, g_songs[cur_idx].name);
 }
 
+void Songs_Prev(void)
+{
+    if (g_song_num == 0U)
+    {
+        return;
+    }
+    playing  = 0U;
+    pos      = 0U;
+    note_end = 0U;
+    BSP_BEEP_Off();
+    cur_idx = (uint8_t)((cur_idx + g_song_num - 1U) % g_song_num);
+    BSP_UART_Printf("[song] prev %u/%u  %s\r\n",
+                    (unsigned)(cur_idx + 1U), (unsigned)g_song_num, g_songs[cur_idx].name);
+}
+
 void Songs_Stop(void)
 {
     playing  = 0U;

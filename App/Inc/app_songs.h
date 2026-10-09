@@ -33,6 +33,7 @@ extern const uint8_t g_song_num;
    06 蜂鸣器例程和 99 全功能的音乐页都用这一套，别再各写一份。 */
 void        Songs_Play(uint8_t idx);        /* 从第 idx 首的开头开始播 */
 void        Songs_Next(void);               /* 切到下一首并停在待播（不自动播） */
+void        Songs_Prev(void);               /* 切到上一首并停在待播（不自动播，2026-10-09 加） */
 void        Songs_Stop(void);               /* 停止并回到开头 */
 void        Songs_Pause(void);              /* 暂停：停在当前位置 */
 void        Songs_Resume(void);             /* 从暂停处继续；播完/停在开头则从头播 */

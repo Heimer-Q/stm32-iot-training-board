@@ -40,3 +40,6 @@ Desktop.ini
 Tools/preview_*.png
 Tools/预览_*.png
 __pycache__/
+
+# 本地改动前快照（不入库）
+_backup_*/

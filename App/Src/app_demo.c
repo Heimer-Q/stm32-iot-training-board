@@ -48,15 +48,15 @@
 
 /* ------------------------------- 状态 ------------------------------- */
 /* 画面顺序（也是 K1 短按的循环顺序 + 上电默认停在第一页）
-   0 信息页 → 1 状态页（THR/MID/HIGH）→ 2 时间页 → 3 灯控页 → 4 图片页 → 5 音乐页（曲库） */
-typedef enum { SCR_INFO = 0, SCR_STATUS, SCR_CLOCK, SCR_LAMP, SCR_IMAGE, SCR_MUSIC, SCR_NUM } ScreenId;
+   0 信息页 → 1 时间页 → 2 状态页（光/温阈值）→ 3 灯控页 → 4 音乐页（曲库）→ 5 图片页（动图）
+   2026-10-09：按会长要求把"图片↔音乐""状态↔时间"两处对调；枚举顺序即屏幕顺序。 */
+typedef enum { SCR_INFO = 0, SCR_CLOCK, SCR_STATUS, SCR_LAMP, SCR_MUSIC, SCR_IMAGE, SCR_NUM } ScreenId;
 typedef enum { MODE_NORMAL = 0, MODE_LIGHT, MODE_THERMAL, MODE_NUM } WorkMode;
 enum { TU_YEAR = 0, TU_MONTH, TU_DAY, TU_HOUR, TU_MIN, TU_SEC, TU_NUM };
 
 static ScreenId screen   = SCR_INFO;
 static WorkMode mode     = MODE_NORMAL;
 static uint8_t  time_set;
-static uint8_t  k3_swallow;   /* 进时间设置那一次是按着 K3 完成的：松手前吞掉 K3 事件，避免顺手改时间 */
 static uint8_t  thr_sel;      /* 状态页当前选中的参数：0=THR 1=MID 2=HIGH */
 static uint8_t  time_unit;
 static uint8_t  anim_idx;                               /* 当前是第几张动图 */
@@ -139,6 +139,18 @@ static const char *mode_name(void)
     {
         case MODE_LIGHT:   return "LIGHT";
         case MODE_THERMAL: return "THERMAL";
+        default:           return "NORMAL";
+    }
+}
+
+/* 屏幕上的模式短名：THERMAL 有 7 个字符，和两个实测值同一行会超出一行 16 字符的上限，
+   所以屏幕显示 THERM；串口日志仍用 mode_name() 打全名。 */
+static const char *mode_short(void)
+{
+    switch (mode)
+    {
+        case MODE_LIGHT:   return "LIGHT";
+        case MODE_THERMAL: return "THERM";
         default:           return "NORMAL";
     }
 }
@@ -354,24 +366,6 @@ static void thr_step(int32_t dir)
                     BSP_ADC_GetRaw(BSP_ADC_CH_TEMP));
 }
 
-static void thr_reset(void)
-{
-    if (thr_sel == 0U)
-    {
-        light_thr = CFG_LIGHT_THR_DEFAULT;
-    }
-    else if (thr_sel == 1U)
-    {
-        temp_mid = (uint16_t)(4095UL * CFG_TEMP_MID_PCT / 100UL);
-    }
-    else
-    {
-        temp_high = (uint16_t)(4095UL * CFG_TEMP_HIGH_PCT / 100UL);
-    }
-    BSP_UART_Printf("[thr ] reset sel=%u -> THR=%d%%  MID=%u  HIGH=%u\r\n",
-                    thr_sel, light_thr, temp_mid, temp_high);
-}
-
 /* 改一个单位并立即覆盖 RTC */
 static void time_step(int32_t delta)
 {
@@ -391,9 +385,9 @@ static void time_step(int32_t delta)
 }
 
 /* ------------------------------ 画面 ------------------------------ */
-/* 时间页（2026-10-06 晚改版）：
+/* 时间页（2026-10-06 晚改版；2026-10-09 v3 按键对调）：
    平时＝日期行 + 时间行（都居中）；设置中＝选中单位"白底黑字"反白，
-   第 1、4 行放键位提示（K2 换单位 / K1 退出 / 长按 K2- K3+ 加减）。 */
+   第 1、4 行放键位提示（K2/K3 单击换单位 / K1 退出 / 长按 K2+ K3- 加减）。 */
 static void draw_clock(void)
 {
     char   dbuf[12];
@@ -412,7 +406,7 @@ static void draw_clock(void)
     if (time_set)
     {
         show_line_center(0U, "K2:UNIT K1:EXIT");
-        show_line_center(3U, "HOLD K2- K3+");
+        show_line_center(3U, "HOLD K2+ K3-");
         switch (time_unit)
         {
             case TU_YEAR:  dsel = 0; break;
@@ -439,44 +433,49 @@ static void draw_image(void)
     OLED_DrawBitmap(&g_oled, a->w, a->h, a->frames[gif_frame % a->count]);
 }
 
-/* 参数/状态页（2026-10-06 重构）：
-   第 1—3 行 = 三个可调参数（当前选中的那行"白底黑字"反白，只包文字）；
-   第 4 行 = 当前模式 + 两个实测值（光照% / 温度%）。
-   按键：K2 单击切参数、K2 长按 +1、K3 长按 −1、K3 单击恢复默认（见 handle_keys）。 */
+/* 状态页（2026-10-09 v3 重排；同日按会长上板反馈去掉第 1 行下方的 1px 分隔线）：
+   第 1 行 = 模式（NORMAL/LIGHT/THERM）+ 光照实测 + 温度实测——实测值不带"%"，
+             因为到 100% 时带 % 会超出一行 16 字符的上限；模式放第一行，演示时一眼可见。
+   第 2—4 行 = 三个可调阈值（当前选中的那行"白底黑字"反白）：
+       LIGHT OFF = 光照 ≥ 此值就关灯
+       TEMP  ON  = 温度读数低于此值开始亮（热敏是越热读数越小）
+       TEMP  ALL = 更低，三颗全亮
+   按键：K2 单击选下一项、K2 长按 +1；K3 单击选上一项、K3 长按 −1（见 handle_keys）。 */
 static void draw_status(void)
 {
-    char buf[20];
+    char    buf[20];
     uint8_t i;
+    int16_t val[3];
+
+    val[0] = (int16_t)light_thr;
+    val[1] = (int16_t)raw_to_pct(temp_mid);
+    val[2] = (int16_t)raw_to_pct(temp_high);
+
+    /* 第 1 行：模式 + 两个实测值（%-6s 让模式名占满 6 格，实测值列不跳） */
+    (void)snprintf(buf, sizeof(buf), "%-6s L%2d T%2d",
+                   mode_short(), (int)BSP_ADC_LightPercent(), (int)temp_percent());
+    show_line_center(0U, buf);
 
     for (i = 0U; i < 3U; i++)
     {
         switch (i)
         {
-            case 0U:
-                (void)snprintf(buf, sizeof(buf), "THR  %2d%%   L %2d%%",
-                               (int)light_thr, (int)BSP_ADC_LightPercent());
-                break;
-            case 1U:
-                (void)snprintf(buf, sizeof(buf), "MID  %2d%%   T %2d%%",
-                               (int)raw_to_pct(temp_mid), (int)temp_percent());
-                break;
-            default:
-                (void)snprintf(buf, sizeof(buf), "HIGH %2d%%", (int)raw_to_pct(temp_high));
-                break;
+            case 0U:  (void)snprintf(buf, sizeof(buf), "LIGHT OFF  %2d%%", (int)val[0]); break;
+            case 1U:  (void)snprintf(buf, sizeof(buf), "TEMP  ON   %2d%%", (int)val[1]); break;
+            default:  (void)snprintf(buf, sizeof(buf), "TEMP  ALL  %2d%%", (int)val[2]); break;
         }
 
         if (i == thr_sel)
         {
-            BSP_OLED_DrawTextInverse((int16_t)((i + 1U) * line_h), buf);   /* 白底黑字＝当前在调这个 */
+            /* 基线要和 show_line_center(i+1) 对齐（它是 (i+2)*line_h）；
+               原来写 (i+1)*line_h，反白行会往上压掉一行 —— 2026-10-09 实测修复 */
+            BSP_OLED_DrawTextInverse((int16_t)((i + 2U) * line_h), buf);   /* 白底黑字＝当前在调这个 */
         }
         else
         {
-            show_line_center(i, buf);
+            show_line_center((uint8_t)(i + 1U), buf);
         }
     }
-
-    (void)snprintf(buf, sizeof(buf), "MODE %s", mode_name());
-    show_line_center(3U, buf);
 }
 
 /* 灯控页（2026-10-06 新增）：手动控灯都集中到这一页（原来散在信息页/时钟页）。
@@ -546,7 +545,7 @@ static void draw_music(void)
                    st, (unsigned)Songs_Pos(), (unsigned)Songs_Len());
     show_line_center(2U, buf);
 
-    show_line_center(3U, Songs_IsPlaying() ? "K2 PAUSE K3 NEXT" : "K2 PLAY  K3 NEXT");
+    show_line_center(3U, "K2 NEXT K3 PREV");   /* 播放/暂停＝长按 K2（2026-10-09 v3） */
 }
 
 /* 信息页：前三行是学生字库里的中文（生成时用 | 分隔），第 4 行显示"日期 + 时间" */
@@ -615,19 +614,6 @@ static void handle_keys(void)
     e3 = BSP_KEY_GetEvent(BSP_KEY_3);
     count_event(e1); count_event(e2); count_event(e3);
 
-    /* ---------- 进设置那一次是按着 K3 完成的：松手前吞掉 K3 的事件 ---------- */
-    if (k3_swallow)
-    {
-        if (BSP_KEY_IsPressed(BSP_KEY_3) == 0U)
-        {
-            k3_swallow = 0U;
-        }
-        else
-        {
-            e3 = BSP_KEY_EVENT_NONE;
-        }
-    }
-
     /* ---------- K1：单击永远切页（时间设置里＝保存并退出）；长按＝切模式 ---------- */
     switch (e1)
     {
@@ -657,6 +643,14 @@ static void handle_keys(void)
             BSP_UART_Printf("[mode] -> %s\r\n", mode_name());
             mode_beep_start();                  /* 常态 1 声 / 光控 2 声 / 热敏 3 声 */
         }
+        else if (screen == SCR_CLOCK)           /* 时间页：K1 长按＝进时间设置（2026-10-09 从 K3 长按挪过来） */
+        {
+            time_set  = 1U;
+            time_unit = TU_HOUR;
+            rtc_load();
+            if (oled_ok) OLED_Clear(&g_oled);
+            BSP_UART_Printf("[time] enter set (K1 hold)\r\n");
+        }
         else
         {
             BSP_UART_Printf("[ui  ] mode switch only on STATUS page\r\n");
@@ -666,7 +660,9 @@ static void handle_keys(void)
         break;
     }
 
-    /* ---------- 时间设置：K2 单击＝换单位；K2/K3 长按＝±1（连调） ---------- */
+    /* ---------- 时间设置（2026-10-09 v3）：K2 单击＝单位向前、K2 长按＝+1；
+       K3 单击＝单位往回、K3 长按＝−1（连调）——原来是"K2 长按减、K3 长按加"，
+       和状态页正好相反，已对调成全局统一的"K2 加 / K3 减" ---------- */
     if (time_set)
     {
         if (e2 == BSP_KEY_EVENT_CLICK)
@@ -674,38 +670,41 @@ static void handle_keys(void)
             time_unit = (uint8_t)((time_unit + 1U) % TU_NUM);
             BSP_UART_Printf("[time] unit -> %s\r\n", unit_name());
         }
-        if ((e2 == BSP_KEY_EVENT_LONG) || (e2 == BSP_KEY_EVENT_LONG_REPEAT)) time_step(-1);
-        if ((e3 == BSP_KEY_EVENT_LONG) || (e3 == BSP_KEY_EVENT_LONG_REPEAT)) time_step(+1);
+        if (e3 == BSP_KEY_EVENT_CLICK)
+        {
+            time_unit = (uint8_t)((time_unit + TU_NUM - 1U) % TU_NUM);
+            BSP_UART_Printf("[time] unit <- %s\r\n", unit_name());
+        }
+        if ((e2 == BSP_KEY_EVENT_LONG) || (e2 == BSP_KEY_EVENT_LONG_REPEAT)) time_step(+1);
+        if ((e3 == BSP_KEY_EVENT_LONG) || (e3 == BSP_KEY_EVENT_LONG_REPEAT)) time_step(-1);
         return;
     }
-    /* ---------- 参数/状态页：K2 单击＝切参数；K2 长按＝+1、K3 长按＝−1；K3 单击＝恢复默认 ---------- */
+    /* ---------- 状态页（2026-10-09 v3）：K2 单击＝选下一项、K2 长按＝+1；
+       K3 单击＝选上一项、K3 长按＝−1。
+       删掉"K3 单击＝恢复默认"——长按阈值只有 400ms，想按一下确认就容易误触把调好的
+       阈值清零；要改回来按 K3 长按减即可。 ---------- */
     if (screen == SCR_STATUS)
     {
         if (e2 == BSP_KEY_EVENT_CLICK)
         {
             thr_sel = (uint8_t)((thr_sel + 1U) % 3U);
-            BSP_UART_Printf("[thr ] select %u (0=THR 1=MID 2=HIGH)\r\n", thr_sel);
+            BSP_UART_Printf("[thr ] select %u (0=LIGHT-OFF 1=TEMP-ON 2=TEMP-ALL)\r\n", thr_sel);
+        }
+        if (e3 == BSP_KEY_EVENT_CLICK)
+        {
+            thr_sel = (uint8_t)((thr_sel + 2U) % 3U);
+            BSP_UART_Printf("[thr ] select %u (0=LIGHT-OFF 1=TEMP-ON 2=TEMP-ALL)\r\n", thr_sel);
         }
         if ((e2 == BSP_KEY_EVENT_LONG) || (e2 == BSP_KEY_EVENT_LONG_REPEAT)) thr_step(+1);
         if ((e3 == BSP_KEY_EVENT_LONG) || (e3 == BSP_KEY_EVENT_LONG_REPEAT)) thr_step(-1);
-        if (e3 == BSP_KEY_EVENT_CLICK) thr_reset();
         return;
     }
 
     /* ---------- 图片页：短按换动图，长按调速度 ---------- */
     if (screen == SCR_IMAGE)
     {
-        if (e2 == BSP_KEY_EVENT_CLICK)                 /* 上一张动图 */
-        {
-            anim_idx = (uint8_t)((anim_idx + OLED_ANIM_COUNT - 1U) % OLED_ANIM_COUNT);
-            gif_frame = 0U;
-            gif_delay_ms = OLED_ANIMS[anim_idx].delay_ms;
-            BSP_UART_Printf("[gif ] anim %d/%d  %dx%d  %d frames\r\n",
-                            anim_idx + 1, OLED_ANIM_COUNT,
-                            OLED_ANIMS[anim_idx].w, OLED_ANIMS[anim_idx].h,
-                            OLED_ANIMS[anim_idx].count);
-        }
-        if (e3 == BSP_KEY_EVENT_CLICK)                 /* 下一张动图 */
+        /* 2026-10-09 v3：按"K2 加 / K3 减"对调——K2＝下一张 / 变快，K3＝上一张 / 变慢 */
+        if (e2 == BSP_KEY_EVENT_CLICK)                 /* 下一张动图 */
         {
             anim_idx = (uint8_t)((anim_idx + 1U) % OLED_ANIM_COUNT);
             gif_frame = 0U;
@@ -715,31 +714,32 @@ static void handle_keys(void)
                             OLED_ANIMS[anim_idx].w, OLED_ANIMS[anim_idx].h,
                             OLED_ANIMS[anim_idx].count);
         }
-        if (e2 == BSP_KEY_EVENT_LONG)                  /* 慢 */
+        if (e3 == BSP_KEY_EVENT_CLICK)                 /* 上一张动图 */
         {
-            gif_delay_ms = (uint16_t)((gif_delay_ms < 400U) ? (gif_delay_ms + 20U) : 400U);
-            BSP_UART_Printf("[gif ] delay %u ms\r\n", gif_delay_ms);
+            anim_idx = (uint8_t)((anim_idx + OLED_ANIM_COUNT - 1U) % OLED_ANIM_COUNT);
+            gif_frame = 0U;
+            gif_delay_ms = OLED_ANIMS[anim_idx].delay_ms;
+            BSP_UART_Printf("[gif ] anim %d/%d  %dx%d  %d frames\r\n",
+                            anim_idx + 1, OLED_ANIM_COUNT,
+                            OLED_ANIMS[anim_idx].w, OLED_ANIMS[anim_idx].h,
+                            OLED_ANIMS[anim_idx].count);
         }
-        if (e3 == BSP_KEY_EVENT_LONG)                  /* 快 */
+        if (e2 == BSP_KEY_EVENT_LONG)                  /* 变快：每帧时长 −20ms */
         {
             gif_delay_ms = (uint16_t)((gif_delay_ms > 30U) ? (gif_delay_ms - 20U) : 30U);
+            BSP_UART_Printf("[gif ] delay %u ms\r\n", gif_delay_ms);
+        }
+        if (e3 == BSP_KEY_EVENT_LONG)                  /* 变慢：每帧时长 +20ms */
+        {
+            gif_delay_ms = (uint16_t)((gif_delay_ms < 400U) ? (gif_delay_ms + 20U) : 400U);
             BSP_UART_Printf("[gif ] delay %u ms\r\n", gif_delay_ms);
         }
         return;
     }
 
-    /* ---------- 时间页：K3 长按＝进时间设置（任何模式下都能进）；其它键不动作 ---------- */
+    /* ---------- 时间页：进设置已挪到 K1 长按（见上面 K1 分支）；平时 K2/K3 不动作 ---------- */
     if (screen == SCR_CLOCK)
     {
-        if (e3 == BSP_KEY_EVENT_LONG)
-        {
-            time_set   = 1U;
-            time_unit  = TU_HOUR;
-            k3_swallow = 1U;             /* 松手前吞掉 K3 的后续事件 */
-            rtc_load();
-            if (oled_ok) OLED_Clear(&g_oled);
-            BSP_UART_Printf("[time] enter set (K3 hold)\r\n");
-        }
         return;
     }
 
@@ -787,18 +787,23 @@ static void handle_keys(void)
         return;
     }
 
-    /* ---------- 音乐页：K2 单击＝播放/暂停、K3 单击＝切歌 ----------
-       暂停后按 K2 从当前音符继续；播完/待播状态按 K2 从头播。离开这一页时（K1）自动暂停。 */
+    /* ---------- 音乐页（2026-10-09 v3）：K2 单击＝下一首、K2 长按＝播放/暂停、K3 单击＝上一首
+       —— 按"K2 加（顺向）/ K3 减（逆向）"的统一规则重排，播放/暂停由单击改为长按。
+       暂停后按 K2 长按从当前音符继续；播完/待播状态按 K2 长按从头播。离开这一页时（K1）自动暂停。 */
     if (screen == SCR_MUSIC)
     {
         if (e2 == BSP_KEY_EVENT_CLICK)
+        {
+            Songs_Next();
+        }
+        if (e2 == BSP_KEY_EVENT_LONG)
         {
             if (Songs_IsPlaying() != 0U) Songs_Pause();
             else                         Songs_Resume();
         }
         if (e3 == BSP_KEY_EVENT_CLICK)
         {
-            Songs_Next();
+            Songs_Prev();
         }
         return;
     }
@@ -838,11 +843,13 @@ void APP_Demo_Init(void)
                         OLED_ANIMS[i].delay_ms,
                         ((OLED_ANIMS[i].w + 7) / 8) * OLED_ANIMS[i].h * OLED_ANIMS[i].count);
     }
-    BSP_UART_Printf("[tips] 6 pages INFO>STATUS>CLOCK>LAMP>IMAGE>MUSIC; K1 click=next, K1 hold on STATUS=mode(1/2/3 beeps)\r\n");
-    BSP_UART_Printf("[tips] STATUS: K2 sel/K2H+/K3H-/K3 reset | CLOCK: K3H=set | LAMP: K2 sel+ALL/K3 breath+flow | MUSIC: K2 play-pause/K3 next (%u songs)\r\n", (unsigned)g_song_num);
+    BSP_UART_Printf("[tips] 6 pages INFO>CLOCK>STATUS>LAMP>MUSIC>IMAGE; K1 click=next, K1 hold=STATUS:mode(1/2/3 beeps) / CLOCK:set time\r\n");
+    BSP_UART_Printf("[tips] K2 always +/next, K3 always -/prev; %u songs\r\n", (unsigned)g_song_num);
+    BSP_UART_Printf("[tips] CLOCK: K2/K3 click=unit, K2H+/K3H- | LAMP: K2 sel+ALL / K3 toggle+flow\r\n");
+    BSP_UART_Printf("[tips] MUSIC: K2 next / K2H play-pause / K3 prev | IMAGE: K2 next+fast / K3 prev+slow\r\n");
 
     lamp_sel = 0U; lamp_mask = 0U; lamp_breath = 0U; lamp_flow = 0U;
-    screen = SCR_INFO; mode = MODE_NORMAL; time_set = 0U; k3_swallow = 0U; thr_sel = 0U;
+    screen = SCR_INFO; mode = MODE_NORMAL; time_set = 0U; thr_sel = 0U;
 
     boot_ms = HAL_GetTick();
     t_adc = t_draw = t_beat = boot_ms;
